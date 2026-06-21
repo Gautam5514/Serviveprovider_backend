@@ -4,6 +4,7 @@ const { protect, adminOnly } = require("../middleware/auth");
 const {
   getPendingProviders,
   getProviderDetails,
+  getProviderBookings,
   verifyProvider,
   getApprovedProviders,
   getAnalytics,
@@ -23,8 +24,9 @@ router.use(protect, adminOnly);
 
 router.get("/providers/pending",    getPendingProviders);
 router.get("/providers/approved",   getApprovedProviders);
-router.get("/providers/:id",        getProviderDetails);
-router.put("/providers/:id/verify", verifyProvider);
+router.get("/providers/:id",          getProviderDetails);
+router.get("/providers/:id/bookings", getProviderBookings);
+router.put("/providers/:id/verify",   verifyProvider);
 
 router.get("/analytics",            getAnalytics);
 

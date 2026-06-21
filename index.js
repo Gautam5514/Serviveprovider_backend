@@ -106,6 +106,7 @@ app.use("/api/search",        require("./routes/searchRoutes"));
 app.use("/api/stats",         require("./routes/statsRoutes"));
 app.use("/api/support",        require("./routes/supportRoutes"));
 app.use("/api/testimonials",   require("./routes/testimonialRoutes"));
+app.use("/api/places",         require("./routes/placesRoutes"));
 
 // ─── Static files (uploaded images / PDFs) ───────────────────────────────────
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));

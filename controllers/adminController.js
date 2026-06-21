@@ -75,6 +75,49 @@ const getProviderDetails = async (req, res) => {
   }
 };
 
+// ─── GET /admin/providers/:id/bookings ───────────────────────────────────────
+// All jobs/bookings handled by a provider, so admins can audit their work history.
+const getProviderBookings = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const provider = await Provider.findById(id).populate("userId", "fullName email");
+    if (!provider) {
+      return res.status(404).json({ success: false, message: "Provider not found" });
+    }
+
+    const bookings = await Booking.find({ providerId: id })
+      .populate("customerId", "fullName")
+      .populate("ratingId", "rating review")
+      .sort({ scheduledDate: -1 });
+
+    const completed = bookings.filter((b) => b.status === "completed");
+    const summary = {
+      total:     bookings.length,
+      completed: completed.length,
+      active:    bookings.filter((b) => ["pending", "accepted", "provider_on_way", "in_progress"].includes(b.status)).length,
+      cancelled: bookings.filter((b) => ["cancelled", "disputed"].includes(b.status)).length,
+      revenue:   completed.reduce((s, b) => s + (b.pricing?.totalAmount || 0), 0),
+    };
+
+    res.status(200).json({
+      success: true,
+      provider: {
+        _id:                provider._id,
+        fullName:           provider.userId?.fullName || "Unknown",
+        email:              provider.userId?.email || "",
+        rating:             provider.rating,
+        totalReviews:       provider.totalReviews,
+        totalJobsCompleted: provider.totalJobsCompleted,
+      },
+      bookings,
+      summary,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || "Server error" });
+  }
+};
+
 // ─── PUT /admin/providers/:id/verify ─────────────────────────────────────────
 const verifyProvider = async (req, res) => {
   try {
@@ -212,6 +255,7 @@ const {
 module.exports = {
   getPendingProviders,
   getProviderDetails,
+  getProviderBookings,
   verifyProvider,
   getApprovedProviders,
   getAnalytics,

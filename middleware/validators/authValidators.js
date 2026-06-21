@@ -36,6 +36,10 @@ const otpField = body("otp")
 const verificationTokenField = body("verificationToken")
   .notEmpty().withMessage("Verification token is required.");
 
+// /auth/register receives the email-verified token issued after OTP confirmation
+const emailVerificationTokenField = body("emailVerificationToken")
+  .notEmpty().withMessage("Email verification is required. Please verify your email again.");
+
 // ─── POST /auth/send-register-otp ─────────────────────────────────────────────
 const validateSendOTP = [emailField, handleValidation];
 
@@ -57,7 +61,7 @@ const validateRegister = [
   body("role")
     .optional()
     .isIn(["customer", "provider"]).withMessage("Role must be customer or provider."),
-  verificationTokenField,
+  emailVerificationTokenField,
   handleValidation,
 ];
 
