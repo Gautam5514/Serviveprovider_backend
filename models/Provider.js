@@ -33,7 +33,8 @@ const ONBOARDING_STATUSES = [
 
 const JOB_TIERS = ["basic", "home_entry", "priority"];
 
-const SERVICE_CATEGORIES = ["ac", "cooler", "fan", "tv", "fridge", "electrical", "appliance"];
+// Kept in sync with constants/categories.js (single source of truth).
+const { SERVICE_CATEGORIES } = require("../constants/categories");
 
 // --- Embedded: one entry per service the provider offers ---
 const providerServiceSchema = new mongoose.Schema(

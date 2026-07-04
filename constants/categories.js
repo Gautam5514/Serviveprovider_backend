@@ -2,7 +2,7 @@
 // The customer app (icons/labels), the Service model, the Booking model and the
 // admin create/update validation all reference this list so a service can never
 // be created with a category that bookings would later reject.
-const SERVICE_CATEGORIES = ["ac", "cooler", "fan", "tv", "fridge", "electrical", "appliance"];
+const SERVICE_CATEGORIES = ["ac", "cooler", "fan", "tv", "fridge", "electrical", "appliance", "cleaning", "other"];
 
 // Common free-form / legacy spellings mapped onto a canonical category, so an
 // admin typing "Electric Wire" or "Refrigerator" still lands on a valid slug.
@@ -20,6 +20,17 @@ const CATEGORY_ALIASES = {
   "air-conditioning": "ac",
   "air-cooler": "cooler",
   "appliances": "appliance",
+  "clean": "cleaning",
+  "cleaner": "cleaning",
+  "home-cleaning": "cleaning",
+  "deep-cleaning": "cleaning",
+  "bathroom-cleaning": "cleaning",
+  "bathroom-clean": "cleaning",
+  "kitchen-cleaning": "cleaning",
+  "sofa-cleaning": "cleaning",
+  "others": "other",
+  "misc": "other",
+  "general": "other",
 };
 
 function canonicalCategory(slug) {

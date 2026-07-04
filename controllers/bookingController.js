@@ -42,6 +42,10 @@ const SERVICE_CATEGORY_KEYWORDS = {
   fridge: ["fridge", "refrigerator", "freezer"],
   electrical: ["electric", "electrical", "wiring", "switch", "socket", "mcb"],
   appliance: ["appliance", "fridge", "refrigerator", "washing", "geyser", "microwave"],
+  cleaning: ["clean", "cleaning", "bathroom", "kitchen", "sofa", "housekeeping"],
+  // "other" is a catch-all — providers match it only by explicitly listing the
+  // category on their profile, never via keyword inference.
+  other: [],
 };
 
 function getProviderServiceCategories(provider) {

@@ -3,6 +3,35 @@ const Provider       = require("../models/Provider");
 const Booking        = require("../models/Booking");
 const mongoose       = require("mongoose");
 
+// Clients may send display labels ("Fair price") instead of enum keys
+// ("value_for_money"). Normalise here so a label variation never crashes the
+// save with a Mongoose enum validation error; unknown tags are dropped.
+const TAG_ALIASES = {
+  "professional":    "professional",
+  "punctual":        "punctual",
+  "on time":         "punctual",
+  "skilled":         "skilled",
+  "expert":          "skilled",
+  "clean work":      "clean_work",
+  "clean_work":      "clean_work",
+  "friendly":        "friendly",
+  "polite":          "friendly",
+  "fair price":      "value_for_money",
+  "value for money": "value_for_money",
+  "value_for_money": "value_for_money",
+};
+
+function normalizeTags(tags) {
+  if (!Array.isArray(tags)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const t of tags) {
+    const key = TAG_ALIASES[String(t).trim().toLowerCase()];
+    if (key && !seen.has(key)) { seen.add(key); out.push(key); }
+  }
+  return out;
+}
+
 // ─── POST /api/ratings ────────────────────────────────────────────────────────
 // Customer submits a rating after job completion.
 const submitRating = async (req, res) => {
@@ -36,7 +65,7 @@ const submitRating = async (req, res) => {
       bookingId,
       rating:  Number(rating),
       review:  review?.trim() || "",
-      tags:    Array.isArray(tags) ? tags : [],
+      tags:    normalizeTags(tags),
     });
 
     // Mark booking as rated

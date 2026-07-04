@@ -102,6 +102,7 @@ app.use("/api/admin",         require("./routes/adminRoutes"));
 app.use("/api/upload",        require("./routes/uploadRoutes"));
 app.use("/api/services",      require("./routes/serviceRoutes"));
 app.use("/api/bookings",      require("./routes/bookingRoutes"));
+app.use("/api/payments",      require("./routes/paymentRoutes"));
 app.use("/api/ratings",       require("./routes/ratingRoutes"));
 app.use("/api/addresses",     require("./routes/addressRoutes"));
 app.use("/api/coupons",       require("./routes/couponRoutes"));

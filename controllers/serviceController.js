@@ -116,6 +116,7 @@ const createAdminService = async (req, res) => {
       isPopular = false,
       active = true,
       sortOrder = 0,
+      images = [],
     } = req.body;
 
     const normalizedCategory = normalizeCategory(category);
@@ -151,6 +152,7 @@ const createAdminService = async (req, res) => {
       isPopular: Boolean(isPopular),
       active: Boolean(active),
       sortOrder: Number(sortOrder) || 0,
+      images,
     });
 
     res.status(201).json({ success: true, service });
@@ -172,6 +174,7 @@ const updateAdminService = async (req, res) => {
       "isPopular",
       "active",
       "sortOrder",
+      "images",
     ];
     const update = {};
     for (const key of allowed) {

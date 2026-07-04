@@ -217,15 +217,37 @@ const register = catchAsync(async (req, res) => {
   });
 });
 
+// Which roles may sign in through each web portal. The web app is split into a
+// customer site (/login) and a partner site (/professional/login); this keeps a
+// provider from logging in on the customer door and vice-versa. `portal` is
+// optional so native apps (already separated) and other clients are unaffected.
+const PORTAL_ROLES = {
+  customer:     ["customer", "admin"], // admins sign in on the main/customer site
+  professional: ["provider"],
+};
+
 // ─── POST /auth/login ─────────────────────────────────────────────────────────
 const login = catchAsync(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, portal } = req.body;
 
   const user = await User.findOne({ email: email.toLowerCase().trim() });
   if (!user) throw new AppError("Incorrect email or password.", 401);
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) throw new AppError("Incorrect email or password.", 401);
+
+  // Portal gate — runs only AFTER the password check, so it can't be used to
+  // probe which accounts exist. Wrong door → a clear pointer to the right one.
+  // Channel-neutral wording: the same gate serves web portals and mobile apps.
+  const allowed = PORTAL_ROLES[portal];
+  if (allowed && !allowed.includes(user.role)) {
+    throw new AppError(
+      portal === "professional"
+        ? "This is a partner login for professionals. Please sign in from the customer app or website instead."
+        : "This is a professional account. Please sign in on the EliteCrew Pro partner app or the partner login.",
+      403
+    );
+  }
 
   const mainToken = signToken({ id: user._id, email: user.email, role: user.role }, "7d");
 

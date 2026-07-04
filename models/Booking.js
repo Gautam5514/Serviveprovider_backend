@@ -81,6 +81,11 @@ const BookingSchema = new mongoose.Schema(
       default: "cash_on_delivery",
     },
 
+    // ── Razorpay (online payments) ────────────────────────────────────────────
+    razorpayOrderId:   { type: String },
+    razorpayPaymentId: { type: String },
+    paidAt:            { type: Date },
+
     // ── Completion OTP ────────────────────────────────────────────────────────
     // Customer shows this to provider at doorstep to verify & start the job
     completionOtp:         { type: String },
