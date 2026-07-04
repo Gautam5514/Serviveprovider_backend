@@ -216,11 +216,32 @@ const ProviderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    // ─── Reliability ───────────────────────────────
+    // Jobs the provider accepted and then released before completion. Late
+    // releases (already on the way / in progress) hurt the customer more and
+    // are flagged for future match-priority / warning / suspension logic.
+    cancellationCount: {
+      type: Number,
+      default: 0,
+    },
+    cancellations: [
+      {
+        bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking" },
+        reason:    { type: String, trim: true },
+        stage:     { type: String }, // booking status when released
+        late:      { type: Boolean, default: false },
+        at:        { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );
 
 ProviderSchema.index({ location: "2dsphere" });
+// Serves every matching/broadcast query ({ isActive, onboardingStatus }) and the
+// public directory listing, which sorts the same filter by rating.
+ProviderSchema.index({ onboardingStatus: 1, isActive: 1, rating: -1 });
 
 module.exports =
   mongoose.models.Provider || mongoose.model("Provider", ProviderSchema);

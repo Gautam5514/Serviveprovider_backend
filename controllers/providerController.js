@@ -6,6 +6,12 @@ const ProviderBankDetails = require("../models/ProviderBankDetails");
 const ProviderWorkProof = require("../models/ProviderWorkProof");
 const ProviderAgreement = require("../models/ProviderAgreement");
 
+// User input goes into a RegExp — escape it so "(" or "*" can't crash the
+// query (500) or change its meaning.
+function escapeRegex(v = "") {
+  return String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function getLocationUpdate(location) {
   if (!location) return {};
   const lat = Number(location.lat);
@@ -25,12 +31,17 @@ const getProviders = async (req, res) => {
   try {
     const { city, service } = req.query;
     const filter = { isActive: true, onboardingStatus: "approved" };
-    if (city) filter.city = new RegExp(city, "i");
+    if (city) filter.city = new RegExp(escapeRegex(city), "i");
     if (service) filter["services.category"] = service;
 
+    // No phone in the public listing — customers get the provider's number only
+    // after a booking is assigned. Exposing it here lets anyone scrape every
+    // provider's personal number without signing in.
     const providers = await Provider.find(filter)
-      .populate("userId", "fullName phone profilePhoto")
-      .sort({ rating: -1, totalReviews: -1 });
+      .populate("userId", "fullName profilePhoto")
+      .sort({ rating: -1, totalReviews: -1 })
+      .limit(200)
+      .lean();
 
     res.status(200).json({ success: true, providers });
   } catch (error) {

@@ -11,6 +11,7 @@ const {
   pickupJob,
   acceptJob,
   rejectJob,
+  providerCancelJob,
   markOnWay,
   startJob,
   completeJob,
@@ -32,6 +33,7 @@ router.get("/provider/earnings",      protect, providerOnly, getProviderEarnings
 router.put("/:id/pickup",             protect, providerOnly, pickupJob);
 router.put("/:id/accept",             protect, providerOnly, acceptJob);
 router.put("/:id/reject",             protect, providerOnly, rejectJob);
+router.put("/:id/provider-cancel",    protect, providerOnly, providerCancelJob);
 router.put("/:id/on-way",             protect, providerOnly, markOnWay);
 router.put("/:id/location",           protect, providerOnly, updateProviderLocation);
 router.put("/:id/start",              protect, providerOnly, startJob);

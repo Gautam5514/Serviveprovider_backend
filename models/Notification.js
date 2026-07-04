@@ -17,9 +17,11 @@ const NotificationSchema = new mongoose.Schema(
       type: String,
       enum: [
         "booking_created",
+        "booking_cancelled",
         "new_job_available",
         "job_claimed",
         "provider_on_way",
+        "provider_released",
         "job_started",
         "job_completed",
         "invoice_ready",

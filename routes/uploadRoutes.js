@@ -3,6 +3,8 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { protect } = require("../middleware/auth");
+const { uploadLimiter } = require("../middleware/rateLimiter");
 
 // Ensure uploads directory exists
 const uploadDir = path.join(__dirname, "..", "uploads");
@@ -41,8 +43,9 @@ const upload = multer({
   },
 });
 
-// Single file upload route
-router.post("/", upload.single("file"), (req, res) => {
+// Single file upload route — auth required (KYC docs, work proofs, profile
+// photos are all uploaded by signed-in users) + rate-limited against disk abuse.
+router.post("/", protect, uploadLimiter, upload.single("file"), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });

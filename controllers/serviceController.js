@@ -1,4 +1,5 @@
 const Service = require("../models/Service");
+const { SERVICE_CATEGORIES, canonicalCategory } = require("../constants/categories");
 
 // Seed default services if collection is empty (called on first GET)
 const DEFAULT_SERVICES = [
@@ -46,8 +47,13 @@ function makeSlug(value = "") {
     .replace(/(^-|-$)/g, "");
 }
 
+// Slugify a free-form category, then snap common spellings onto a canonical
+// category (e.g. "Electric Wire" → "electric-wire" → "electrical"). Returns ""
+// only for blank input; an unknown slug is returned as-is so the caller can
+// reject it with a helpful message.
 function normalizeCategory(value = "") {
-  return makeSlug(value);
+  const slug = makeSlug(value);
+  return slug ? canonicalCategory(slug) : "";
 }
 
 // GET /api/services?category=ac
@@ -116,6 +122,12 @@ const createAdminService = async (req, res) => {
     if (!name || !normalizedCategory || basePrice === undefined) {
       return res.status(400).json({ success: false, message: "Name, category, and base price are required." });
     }
+    if (!SERVICE_CATEGORIES.includes(normalizedCategory)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid category "${category}". Allowed categories: ${SERVICE_CATEGORIES.join(", ")}.`,
+      });
+    }
 
     const baseSlug = makeSlug(req.body.slug || name);
     let slug = baseSlug;
@@ -171,7 +183,15 @@ const updateAdminService = async (req, res) => {
     if (update.whatIsIncluded !== undefined && !Array.isArray(update.whatIsIncluded)) {
       update.whatIsIncluded = String(update.whatIsIncluded).split("\n").map((item) => item.trim()).filter(Boolean);
     }
-    if (update.category !== undefined) update.category = normalizeCategory(update.category);
+    if (update.category !== undefined) {
+      update.category = normalizeCategory(update.category);
+      if (!SERVICE_CATEGORIES.includes(update.category)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid category. Allowed categories: ${SERVICE_CATEGORIES.join(", ")}.`,
+        });
+      }
+    }
 
     const service = await Service.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     if (!service) return res.status(404).json({ success: false, message: "Service not found." });

@@ -13,8 +13,8 @@ const {
 router.get("/",  getPublicTestimonials);
 router.post("/", submitTestimonial);
 
-// Admin moderation queue
-router.get("/:id/pending", protect, adminOnly, getPendingTestimonials);
+// Admin moderation queue — static path, kept before the /:id routes
+router.get("/pending",     protect, adminOnly, getPendingTestimonials);
 router.put("/:id/approve", protect, adminOnly, approveTestimonial);
 router.delete("/:id",      protect, adminOnly, deleteTestimonial);
 

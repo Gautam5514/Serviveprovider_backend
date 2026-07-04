@@ -1,4 +1,6 @@
+const crypto = require("crypto");
 const mongoose = require("mongoose");
+const { SERVICE_CATEGORIES } = require("../constants/categories");
 
 const STATUSES = [
   "pending",          // created, waiting for provider acceptance
@@ -32,7 +34,7 @@ const BookingSchema = new mongoose.Schema(
     // ── Service details ───────────────────────────────────────────────────────
     serviceCategory: {
       type: String,
-      enum: ["ac", "cooler", "fan", "tv", "fridge", "electrical", "appliance"],
+      enum: SERVICE_CATEGORIES,
       required: true,
     },
     serviceName: { type: String, required: true, trim: true },
@@ -109,12 +111,14 @@ const BookingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Auto-generate booking number before save
+// Auto-generate booking number before save.
+// 6 crypto-random digits: 4 digits gave only 9 000 combinations per day, which
+// collides realistically under load and makes the save throw on the unique index.
 BookingSchema.pre("save", function (next) {
   if (!this.bookingNumber) {
     const d   = new Date();
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    const rnd = Math.floor(1000 + Math.random() * 9000);
+    const rnd = crypto.randomInt(100000, 1000000);
     this.bookingNumber = `BK${ymd}${rnd}`;
   }
   next();
@@ -123,6 +127,9 @@ BookingSchema.pre("save", function (next) {
 BookingSchema.index({ customerId: 1, createdAt: -1 });
 BookingSchema.index({ providerId: 1, status: 1 });
 BookingSchema.index({ status: 1 });
+// Serves the open-job-pool query: { status:"pending", providerId:null,
+// serviceCategory:{$in}, scheduledDate:{$gte} } sorted by scheduledDate.
+BookingSchema.index({ status: 1, providerId: 1, serviceCategory: 1, scheduledDate: 1 });
 BookingSchema.index({ "address.lat": 1, "address.lng": 1 });
 
 module.exports =

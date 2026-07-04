@@ -4,6 +4,7 @@ const cookieParser = require("cookie-parser");
 const path = require("path");
 const http = require("http");
 const helmet = require("helmet");
+const compression = require("compression");
 const mongoSanitize = require("express-mongo-sanitize");
 
 dotenv.config();
@@ -73,6 +74,9 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+// ─── Gzip responses — large JSON payloads (bookings, providers) shrink ~5-10x ─
+app.use(compression());
 
 // ─── General rate limiter (applied before body parsing to save CPU on floods) ─
 app.use("/api/", generalLimiter);

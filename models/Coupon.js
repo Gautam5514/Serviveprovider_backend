@@ -21,6 +21,6 @@ const CouponSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-CouponSchema.index({ code: 1 });
+// (code already has a unique index from the field definition above)
 
 module.exports = mongoose.models.Coupon || mongoose.model("Coupon", CouponSchema);

@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { SERVICE_CATEGORIES } = require("../constants/categories");
 
 const ServiceSchema = new mongoose.Schema(
   {
@@ -9,6 +10,7 @@ const ServiceSchema = new mongoose.Schema(
       required: true,
       trim: true,
       lowercase: true,
+      enum: SERVICE_CATEGORIES,
     },
     description:   { type: String, trim: true },
     basePrice:     { type: Number, required: true, min: 0 },

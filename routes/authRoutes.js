@@ -16,6 +16,7 @@ const {
   login,
   checkEmail,
   getMe,
+  updateMe,
   getWsToken,
   logout,
   sendRegisterOTP,
@@ -31,6 +32,7 @@ router.get ("/check-email",          authLimiter,                             ch
 
 // Session management (cookie-based)
 router.get ("/me",                  protect,                             getMe);
+router.put ("/me",                  protect,                             updateMe);
 router.get ("/ws-token",            protect,                             getWsToken);
 router.post("/logout",              protect,                             logout);
 

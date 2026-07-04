@@ -3,7 +3,10 @@ const Coupon = require("../models/Coupon");
 // POST /api/coupons/validate  — customer checks if a coupon is valid
 const validateCoupon = async (req, res) => {
   try {
-    const { code, orderAmount, category } = req.body;
+    const { code, category } = req.body;
+    // Coerce — a missing/string orderAmount would make every numeric check
+    // below silently pass (NaN comparisons are false) and produce a NaN discount.
+    const orderAmount = Number(req.body.orderAmount) || 0;
     if (!code) return res.status(400).json({ success: false, message: "Coupon code is required." });
 
     const coupon = await Coupon.findOne({ code: code.toUpperCase().trim(), isActive: true });

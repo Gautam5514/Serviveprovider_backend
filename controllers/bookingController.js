@@ -1,9 +1,12 @@
+const crypto           = require("crypto");
 const Booking          = require("../models/Booking");
 const Provider         = require("../models/Provider");
 const ProviderRating   = require("../models/ProviderRating");
 const User             = require("../models/User");
 const Coupon           = require("../models/Coupon");
+const Service          = require("../models/Service");
 const ProviderAvailability = require("../models/ProviderAvailability");
+const { SERVICE_CATEGORIES, canonicalCategory } = require("../constants/categories");
 const {
   sendJobCompletedEmail,
 } = require("../utils/emailService");
@@ -13,7 +16,18 @@ const { emitToUser } = require("../socket");
 const DAY_MAP = ["sun","mon","tue","wed","thu","fri","sat"];
 
 function generateOTP() {
-  return Math.floor(1000 + Math.random() * 9000).toString();
+  // crypto-random — Math.random() is predictable and not safe for a verification code
+  return crypto.randomInt(1000, 10000).toString();
+}
+
+// The completion OTP is the customer's doorstep secret. A provider must never
+// receive it in any API response, or they could "start" a job without actually
+// being with the customer.
+function stripOtp(bookingDoc) {
+  if (!bookingDoc) return bookingDoc;
+  const obj = typeof bookingDoc.toObject === "function" ? bookingDoc.toObject() : { ...bookingDoc };
+  delete obj.completionOtp;
+  return obj;
 }
 
 function normalizeText(value = "") {
@@ -119,6 +133,13 @@ function startOfToday() {
   return date;
 }
 
+// One query for every provider's availability, exposed as an O(1) lookup map.
+// Replaces the previous per-provider findOne inside the matching loops (N+1).
+async function getAvailabilityMap(providerIds) {
+  const docs = await ProviderAvailability.find({ providerId: { $in: providerIds } }).lean();
+  return new Map(docs.map((doc) => [doc.providerId.toString(), doc]));
+}
+
 // Find the best available provider for a booking
 async function autoAssignProvider(serviceCategory, scheduledDate, address = {}, scheduledTimeSlot = null) {
   const dayOfWeek = DAY_MAP[new Date(scheduledDate).getDay()];
@@ -128,36 +149,41 @@ async function autoAssignProvider(serviceCategory, scheduledDate, address = {}, 
     onboardingStatus: "approved",
   }).sort({ rating: -1, totalJobsCompleted: -1 });
 
+  const availabilityMap = await getAvailabilityMap(providers.map((p) => p._id));
   const bookingLike = { address, scheduledTimeSlot };
-  const matches = [];
+  const candidates = [];
 
   for (const p of providers) {
     if (!providerCanServeCategory(p, serviceCategory)) continue;
 
-    const av = await ProviderAvailability.findOne({ providerId: p._id });
+    const av = availabilityMap.get(p._id.toString());
     if (av && av.availableDays.includes(dayOfWeek)) {
       const locationMatch = jobMatchesProviderLocation(p, av, bookingLike);
       if (!locationMatch.matches) continue;
-
-      // Make sure provider doesn't already have a booking at the same slot
-      const conflict = await Booking.findOne({
-        providerId: p._id,
-        scheduledDate: new Date(scheduledDate),
-        ...(bookingLike.scheduledTimeSlot && { scheduledTimeSlot: bookingLike.scheduledTimeSlot }),
-        status: { $in: ["pending", "accepted", "provider_on_way", "in_progress"] },
-      });
-      if (!conflict) matches.push({ provider: p, distanceKm: locationMatch.distanceKm });
+      candidates.push({ provider: p, distanceKm: locationMatch.distanceKm });
     }
   }
 
-  matches.sort((a, b) => {
+  candidates.sort((a, b) => {
     if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
     if (a.distanceKm !== null) return -1;
     if (b.distanceKm !== null) return 1;
     return (b.provider.rating || 0) - (a.provider.rating || 0);
   });
 
-  return matches[0]?.provider || null;
+  // Check slot conflicts only for the ranked candidates, best-first, so we
+  // stop at the first free provider instead of querying for every provider.
+  for (const { provider } of candidates) {
+    const conflict = await Booking.findOne({
+      providerId: provider._id,
+      scheduledDate: new Date(scheduledDate),
+      ...(scheduledTimeSlot && { scheduledTimeSlot }),
+      status: { $in: ["pending", "accepted", "provider_on_way", "in_progress"] },
+    }).lean();
+    if (!conflict) return provider;
+  }
+
+  return null;
 }
 
 async function getMatchingProvidersForBooking(booking) {
@@ -167,11 +193,13 @@ async function getMatchingProvidersForBooking(booking) {
     onboardingStatus: "approved",
   }).select("userId services city serviceArea location workingRadiusKm");
 
+  const availabilityMap = await getAvailabilityMap(providers.map((p) => p._id));
+
   const matches = [];
   for (const provider of providers) {
     if (!providerCanServeCategory(provider, booking.serviceCategory)) continue;
 
-    const availability = await ProviderAvailability.findOne({ providerId: provider._id });
+    const availability = availabilityMap.get(provider._id.toString());
     if (!availability?.availableDays?.includes(dayOfWeek)) continue;
 
     const locationMatch = jobMatchesProviderLocation(provider, availability, booking);
@@ -202,7 +230,26 @@ const createBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required booking fields" });
     }
 
-    const basePrice   = Number(pricing.basePrice);
+    // Resolve the canonical category. Prefer the authoritative value from the
+    // Service record (by slug) so a stale/old app cache can't send a category
+    // the booking enum would reject; fall back to normalising what was sent.
+    let category = canonicalCategory(serviceCategory);
+    if (serviceSlug) {
+      const svc = await Service.findOne({ slug: serviceSlug }).select("category").lean();
+      if (svc?.category) category = canonicalCategory(svc.category);
+    }
+    if (!SERVICE_CATEGORIES.includes(category)) {
+      return res.status(400).json({ success: false, message: `Unsupported service category "${serviceCategory}".` });
+    }
+
+    // Server-side price sanity bounds — the client computes the cart total, but
+    // a crafted request could send a negative/absurd number. Carts can hold
+    // multiple services and quantities, so we bound-check rather than match a
+    // single catalog price exactly.
+    const basePrice = Math.round(Number(pricing.basePrice));
+    if (!Number.isFinite(basePrice) || basePrice < 49 || basePrice > 500000) {
+      return res.status(400).json({ success: false, message: "Invalid booking amount." });
+    }
     const platformFee = Math.round(basePrice * 0.1);       // 10% platform fee
     const tax         = Math.round((basePrice + platformFee) * 0.18); // 18% GST
     const totalAmount = basePrice + platformFee + tax;
@@ -217,46 +264,62 @@ const createBooking = async (req, res) => {
     if (req.body.couponCode) {
       // ATOMIC coupon redemption — find + increment in a single MongoDB operation.
       // Prevents two concurrent bookings from both passing the usedCount < maxUses
-      // guard and over-redeeming the same limited coupon.
+      // guard and over-redeeming the same limited coupon. The filter also enforces
+      // minOrderValue and applicableCategories so the rules checked by
+      // /coupons/validate cannot be bypassed by calling this endpoint directly.
       // `new: false` returns the doc as it was BEFORE the increment so the
       // original discountValue is used for the calculation below.
       const coupon = await Coupon.findOneAndUpdate(
         {
-          code:      req.body.couponCode.toUpperCase().trim(),
-          isActive:  true,
-          expiresAt: { $gt: new Date() },
-          $or: [
-            { maxUses: null },
-            { $expr: { $lt: ["$usedCount", "$maxUses"] } },
+          code:          req.body.couponCode.toUpperCase().trim(),
+          isActive:      true,
+          expiresAt:     { $gt: new Date() },
+          minOrderValue: { $lte: basePrice },
+          $and: [
+            { $or: [{ maxUses: null }, { $expr: { $lt: ["$usedCount", "$maxUses"] } }] },
+            { $or: [{ applicableCategories: { $size: 0 } }, { applicableCategories: category }] },
           ],
         },
         { $inc: { usedCount: 1 } },
         { new: false }
       );
-      if (coupon) {
-        discount   = coupon.discountType === "percent"
-          ? Math.round((basePrice * coupon.discountValue) / 100)
-          : coupon.discountValue;
-        couponCode = coupon.code;
+      if (!coupon) {
+        return res.status(400).json({
+          success: false,
+          message: "This coupon is invalid, expired, or not applicable to this order.",
+        });
       }
+      discount   = coupon.discountType === "percent"
+        ? Math.round((basePrice * coupon.discountValue) / 100)
+        : coupon.discountValue;
+      couponCode = coupon.code;
     }
 
     const finalTotal = Math.max(0, totalAmount - discount);
 
-    const booking = await Booking.create({
-      customerId,
-      providerId:      provider?._id || null,
-      serviceCategory, serviceName, serviceSlug: serviceSlug || "",
-      scheduledDate:   new Date(scheduledDate),
-      scheduledTimeSlot,
-      address,
-      pricing:         { basePrice, platformFee, tax, discount, totalAmount: finalTotal },
-      paymentStatus:   "unpaid",
-      paymentMethod:   paymentMethod || "cash_on_delivery",
-      completionOtp:   generateOTP(),
-      customerNote:    customerNote || "",
-      status:          "pending",
-    });
+    let booking;
+    try {
+      booking = await Booking.create({
+        customerId,
+        providerId:      provider?._id || null,
+        serviceCategory: category, serviceName, serviceSlug: serviceSlug || "",
+        scheduledDate:   new Date(scheduledDate),
+        scheduledTimeSlot,
+        address,
+        pricing:         { basePrice, platformFee, tax, discount, totalAmount: finalTotal },
+        paymentStatus:   "unpaid",
+        paymentMethod:   paymentMethod || "cash_on_delivery",
+        completionOtp:   generateOTP(),
+        customerNote:    customerNote || "",
+        status:          "pending",
+      });
+    } catch (createError) {
+      // Booking failed after the coupon was already redeemed — give the use back.
+      if (couponCode) {
+        Coupon.updateOne({ code: couponCode }, { $inc: { usedCount: -1 } }).catch(console.error);
+      }
+      throw createError;
+    }
 
     createNotification({
       recipientId: customerId,
@@ -299,9 +362,13 @@ const createBooking = async (req, res) => {
 const getMyBookings = async (req, res) => {
   try {
     const bookings = await Booking.find({ customerId: req.user._id })
-      .populate("providerId", "city serviceArea services")
-      .populate({ path: "providerId", populate: { path: "userId", select: "fullName phone" } })
-      .sort({ createdAt: -1 });
+      .populate({
+        path:     "providerId",
+        select:   "city serviceArea services userId",
+        populate: { path: "userId", select: "fullName phone" },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
     res.json({ success: true, bookings });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -322,13 +389,25 @@ const getBookingById = async (req, res) => {
     const isProvider = booking.providerId?.userId?._id?.toString() === userId;
     const isAdmin    = req.user.role === "admin";
 
-    if (!isCustomer && !isProvider && !isAdmin) {
+    // Open pool jobs (pending + unassigned) are broadcast to matching providers,
+    // so any provider may VIEW one before claiming — with the customer's private
+    // details withheld until they accept.
+    const isPoolPreview = req.user.role === "provider" && !isProvider &&
+      booking.status === "pending" && !booking.providerId;
+
+    if (!isCustomer && !isProvider && !isAdmin && !isPoolPreview) {
       return res.status(403).json({ success: false, message: "Access denied" });
     }
 
-    // Hide OTP from provider (customer sees it, provider enters it to verify)
     const data = booking.toObject();
-    if (isProvider && !isCustomer) delete data.completionOtp;
+    // Hide OTP from providers (only the customer sees it; the provider enters it).
+    if (req.user.role === "provider") delete data.completionOtp;
+
+    // Pool preview: mask PII until the job is claimed.
+    if (isPoolPreview) {
+      if (data.customerId) data.customerId = { _id: data.customerId._id, fullName: data.customerId.fullName };
+      if (data.address) data.address = { city: data.address.city, pincode: data.address.pincode };
+    }
 
     res.json({ success: true, booking: data });
   } catch (error) {
@@ -353,13 +432,39 @@ const cancelBooking = async (req, res) => {
       return res.status(400).json({ success: false, message: `Cannot cancel a ${booking.status} booking` });
     }
 
-    booking.status      = "cancelled";
-    booking.cancelledBy = isAdmin ? "admin" : "customer";
-    booking.cancelReason= req.body.reason || "";
-    booking.cancelledAt = new Date();
-    await booking.save();
+    // ATOMIC — the status guard in the filter means a cancel racing against a
+    // provider's complete/start transition can't clobber the finished state.
+    const cancelled = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: { $nin: ["completed", "cancelled"] } },
+      {
+        $set: {
+          status:       "cancelled",
+          cancelledBy:  isAdmin ? "admin" : "customer",
+          cancelReason: req.body.reason || "",
+          cancelledAt:  new Date(),
+        },
+      },
+      { new: true }
+    );
+    if (!cancelled) {
+      return res.status(409).json({ success: false, message: "This booking was just updated. Please refresh and try again." });
+    }
 
-    res.json({ success: true, message: "Booking cancelled", booking });
+    // Tell the assigned provider so they don't head to a cancelled job.
+    if (cancelled.providerId) {
+      Provider.findById(cancelled.providerId).select("userId").lean()
+        .then((prov) => prov && createNotification({
+          recipientId: prov.userId,
+          recipientRole: "provider",
+          type: "booking_cancelled",
+          title: "Job cancelled",
+          message: `${cancelled.serviceName} on ${new Date(cancelled.scheduledDate).toLocaleDateString("en-IN")} was cancelled by the ${isAdmin ? "admin" : "customer"}.`,
+          bookingId: cancelled._id,
+        }))
+        .catch(console.error);
+    }
+
+    res.json({ success: true, message: "Booking cancelled", booking: cancelled });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -376,6 +481,7 @@ const getProviderJobs = async (req, res) => {
     if (status) filter.status = status;
 
     const jobs = await Booking.find(filter)
+      .select("-completionOtp")
       .populate("customerId", "fullName phone")
       .populate("ratingId", "rating review tags createdAt")
       .sort({ scheduledDate: 1, createdAt: -1 })
@@ -475,10 +581,7 @@ const acceptJob = async (req, res) => {
       );
     }
 
-    const [, providerUser] = await Promise.all([
-      User.findById(booking.customerId).select("fullName"),
-      User.findById(provider.userId).select("fullName"),
-    ]);
+    const providerUser = await User.findById(provider.userId).select("fullName").lean();
     createNotification({
       recipientId: booking.customerId,
       recipientRole: "customer",
@@ -488,7 +591,7 @@ const acceptJob = async (req, res) => {
       bookingId: booking._id,
     }).catch(console.error);
 
-    res.json({ success: true, message: "Job accepted", booking });
+    res.json({ success: true, message: "Job accepted", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -515,7 +618,83 @@ const rejectJob = async (req, res) => {
     booking.cancelledBy = undefined;
     await booking.save();
 
-    res.json({ success: true, message: "Job released back to nearby providers", booking });
+    res.json({ success: true, message: "Job released back to nearby providers", booking: stripOtp(booking) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── PUT /api/bookings/:id/provider-cancel ───────────────────────────────────
+// A provider who accepted a job but can't do it releases it back to the pool.
+// Allowed any time before completion. The job is re-broadcast to other nearby
+// providers, the customer is told a new pro is being assigned, and the release
+// is recorded against the provider's reliability (reasons + strike count).
+const providerCancelJob = async (req, res) => {
+  try {
+    const provider = await Provider.findOne({ userId: req.user._id });
+    if (!provider) return res.status(404).json({ success: false, message: "Provider profile not found" });
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+    if (booking.providerId?.toString() !== provider._id.toString()) {
+      return res.status(403).json({ success: false, message: "This job is not assigned to you" });
+    }
+    if (!["accepted", "provider_on_way", "in_progress"].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: `Cannot release a ${booking.status} job` });
+    }
+
+    const reason = (req.body.reason || "").trim();
+    if (!reason) return res.status(400).json({ success: false, message: "A reason is required to release the job" });
+
+    // Late releases (already en route / in progress) are worse for the customer.
+    const stage = booking.status;
+    const late  = ["provider_on_way", "in_progress"].includes(stage);
+
+    // Record the strike on the provider's reliability history.
+    provider.cancellationCount = (provider.cancellationCount || 0) + 1;
+    provider.cancellations = provider.cancellations || [];
+    provider.cancellations.push({ bookingId: booking._id, reason, stage, late, at: new Date() });
+    await provider.save();
+
+    // Release the booking back into the broadcast pool.
+    const releasedByUserId = provider.userId;
+    booking.providerId            = null;
+    booking.status                = "pending";
+    booking.completionOtpVerified = false;
+    booking.cancelledBy           = undefined;
+    await booking.save();
+
+    // Tell the customer a replacement is being found — booking stays alive.
+    createNotification({
+      recipientId: booking.customerId,
+      recipientRole: "customer",
+      type: "provider_released",
+      title: "Assigning a new professional",
+      message: "Your earlier professional couldn't make it. We're matching you with another nearby pro now.",
+      bookingId: booking._id,
+    }).catch(console.error);
+
+    // Re-broadcast to other matching providers (skip the one who just released).
+    getMatchingProvidersForBooking(booking)
+      .then((matches) => notifyMany(
+        matches
+          .filter(({ provider: p }) => p.userId?.toString() !== releasedByUserId?.toString())
+          .map(({ provider: p, distanceKm }) => ({
+            recipientId: p.userId,
+            recipientRole: "provider",
+            type: "new_job_available",
+            title: "New job near you",
+            message: `${booking.serviceName} is available in ${booking.address?.city || "your service area"}. Confirm first to claim it.`,
+            bookingId: booking._id,
+            data: {
+              distanceKm: distanceKm === null ? null : Number(distanceKm.toFixed(1)),
+              serviceCategory: booking.serviceCategory,
+            },
+          }))
+      ))
+      .catch(console.error);
+
+    res.json({ success: true, message: "Job released. We're finding the customer another provider.", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -542,7 +721,7 @@ const markOnWay = async (req, res) => {
       message: "Your technician has started heading to your location.",
       bookingId: booking._id,
     }).catch(console.error);
-    res.json({ success: true, message: "Customer notified you are on the way", booking });
+    res.json({ success: true, message: "Customer notified you are on the way", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -563,7 +742,9 @@ const startJob = async (req, res) => {
 
     const { otp } = req.body;
     if (!otp) return res.status(400).json({ success: false, message: "OTP is required" });
-    if (otp !== booking.completionOtp) {
+    // Cast before comparing — native clients send the OTP as a number, which
+    // would never strictly equal the string stored on the booking.
+    if (String(otp).trim() !== booking.completionOtp) {
       return res.status(400).json({ success: false, message: "Incorrect OTP. Please ask the customer to check their booking." });
     }
 
@@ -578,7 +759,7 @@ const startJob = async (req, res) => {
       message: "Your OTP was verified and the service is now in progress.",
       bookingId: booking._id,
     }).catch(console.error);
-    res.json({ success: true, message: "OTP verified. Job started!", booking });
+    res.json({ success: true, message: "OTP verified. Job started!", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -637,7 +818,7 @@ const completeJob = async (req, res) => {
       }).catch(console.error);
     }
 
-    res.json({ success: true, message: "Job completed successfully!", booking });
+    res.json({ success: true, message: "Job completed successfully!", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -650,14 +831,16 @@ const getAllBookings = async (req, res) => {
     const filter = {};
     if (status) filter.status = status;
 
-    const bookings = await Booking.find(filter)
-      .populate("customerId", "fullName phone email")
-      .populate({ path: "providerId", populate: { path: "userId", select: "fullName phone" } })
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
-
-    const total = await Booking.countDocuments(filter);
+    const [bookings, total] = await Promise.all([
+      Booking.find(filter)
+        .populate("customerId", "fullName phone email")
+        .populate({ path: "providerId", populate: { path: "userId", select: "fullName phone" } })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .lean(),
+      Booking.countDocuments(filter),
+    ]);
     res.json({ success: true, bookings, total, page: Number(page) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -707,7 +890,7 @@ const getAvailableJobs = async (req, res) => {
       })
       .slice(0, 20)
       .map(({ job, match }) => ({
-        ...job.toObject(),
+        ...stripOtp(job),
         matchDistanceKm: match.distanceKm === null ? null : Number(match.distanceKm.toFixed(1)),
       }));
 
@@ -776,10 +959,7 @@ const pickupJob = async (req, res) => {
       });
     }
 
-    const [, providerUser] = await Promise.all([
-      User.findById(booking.customerId).select("fullName"),
-      User.findById(provider.userId).select("fullName"),
-    ]);
+    const providerUser = await User.findById(provider.userId).select("fullName").lean();
     createNotification({
       recipientId: booking.customerId,
       recipientRole: "customer",
@@ -798,7 +978,7 @@ const pickupJob = async (req, res) => {
       bookingId: booking._id,
     }).catch(console.error);
 
-    res.json({ success: true, message: "Job picked up! It has been added to your active jobs.", booking });
+    res.json({ success: true, message: "Job picked up! It has been added to your active jobs.", booking: stripOtp(booking) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -975,6 +1155,7 @@ module.exports = {
   pickupJob,
   acceptJob,
   rejectJob,
+  providerCancelJob,
   markOnWay,
   startJob,
   completeJob,

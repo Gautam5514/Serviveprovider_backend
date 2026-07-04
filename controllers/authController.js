@@ -1,3 +1,4 @@
+const crypto   = require("crypto");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
 const User     = require("../models/User");
@@ -9,7 +10,9 @@ const catchAsync = require("../utils/catchAsync");
 // ─── Private helpers ──────────────────────────────────────────────────────────
 
 function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // crypto-random — Math.random() output can be predicted, which would let an
+  // attacker guess email-verification and password-reset codes.
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 function signToken(payload, expiresIn) {
@@ -34,7 +37,15 @@ function issueWsToken(user) {
 }
 
 function clearAuthCookie(res) {
-  res.clearCookie("token", { httpOnly: true, sameSite: "lax", path: "/" });
+  // Attributes MUST match setAuthCookie exactly — browsers only clear a cookie
+  // when secure/sameSite/path match the ones it was set with. With "lax" here,
+  // logout silently failed in production where the cookie is "none"+secure.
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path:     "/",
+  });
 }
 
 // Sends OTP email and returns a short-lived verification token.
@@ -192,9 +203,16 @@ const register = catchAsync(async (req, res) => {
     emailVerified: true,
   });
 
+  // Auto-login: issue the same 7-day session token used by /login.
+  // Web receives it as an httpOnly cookie; native clients read it from the body.
+  const mainToken = signToken({ id: user._id, email: user.email, role: user.role }, "7d");
+  setAuthCookie(res, mainToken);
+
   res.status(201).json({
     success: true,
     message: "Account created successfully.",
+    token:   mainToken,
+    wsToken: issueWsToken(user),
     user: { id: user._id, fullName: user.fullName, email: user.email, role: user.role },
   });
 });
@@ -217,6 +235,8 @@ const login = catchAsync(async (req, res) => {
   res.status(200).json({
     success:  true,
     message:  "Login successful.",
+    // Bearer token for native mobile clients (web uses the httpOnly cookie above).
+    token:    mainToken,
     wsToken:  issueWsToken(user), // short-lived, for Socket.io only
     user:     { id: user._id, fullName: user.fullName, email: user.email, role: user.role },
   });
@@ -240,7 +260,61 @@ const checkEmail = catchAsync(async (req, res) => {
 const getMe = catchAsync(async (req, res) => {
   res.json({
     success: true,
-    user:    { id: req.user._id, fullName: req.user.fullName, email: req.user.email, role: req.user.role },
+    user: {
+      id:           req.user._id,
+      fullName:     req.user.fullName,
+      email:        req.user.email,
+      phone:        req.user.phone,
+      role:         req.user.role,
+      profilePhoto: req.user.profilePhoto || null,
+      createdAt:    req.user.createdAt,
+    },
+  });
+});
+
+// ─── PUT /auth/me ─────────────────────────────────────────────────────────────
+// Lets a signed-in user update their own profile. Email is intentionally
+// immutable here — it is the login identifier and is OTP-verified at signup.
+const updateMe = catchAsync(async (req, res) => {
+  const { fullName, phone } = req.body;
+  const updates = {};
+
+  if (fullName !== undefined) {
+    const name = String(fullName).trim();
+    if (name.length < 2 || name.length > 60)
+      throw new AppError("Name must be between 2 and 60 characters.", 400);
+    if (!/^[a-zA-Z\s.'-]+$/.test(name))
+      throw new AppError("Name contains invalid characters.", 400);
+    updates.fullName = name;
+  }
+
+  if (phone !== undefined) {
+    const p = String(phone).trim();
+    if (!/^\d{10}$/.test(p))
+      throw new AppError("Phone number must be exactly 10 digits.", 400);
+    const taken = await User.exists({ phone: p, _id: { $ne: req.user._id } });
+    if (taken)
+      throw new AppError("This phone number is already registered to another account.", 409);
+    updates.phone = p;
+  }
+
+  if (Object.keys(updates).length === 0)
+    throw new AppError("Nothing to update.", 400);
+
+  const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
+
+  res.json({
+    success: true,
+    message: "Profile updated.",
+    user: {
+      id:           user._id,
+      fullName:     user.fullName,
+      email:        user.email,
+      phone:        user.phone,
+      role:         user.role,
+      profilePhoto: user.profilePhoto || null,
+      createdAt:    user.createdAt,
+    },
   });
 });
 
@@ -348,6 +422,7 @@ module.exports = {
   login,
   checkEmail,
   getMe,
+  updateMe,
   getWsToken,
   logout,
   sendRegisterOTP,

@@ -71,23 +71,26 @@ const getProviderRatings = async (req, res) => {
     const { providerId } = req.params;
     const { page = 1, limit = 10 } = req.query;
 
-    const ratings = await ProviderRating.find({
-      providerId,
-      isVisible:   true,
-      adminHidden: false,
-    })
-      .populate("customerId", "fullName")
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
+    if (!mongoose.Types.ObjectId.isValid(providerId)) {
+      return res.status(400).json({ success: false, message: "Invalid provider id." });
+    }
 
-    const total = await ProviderRating.countDocuments({ providerId, isVisible: true, adminHidden: false });
+    const baseFilter = { providerId, isVisible: true, adminHidden: false };
 
-    // Star breakdown
-    const breakdown = await ProviderRating.aggregate([
-      { $match: { providerId: require("mongoose").Types.ObjectId.createFromHexString(providerId), isVisible: true, adminHidden: false } },
-      { $group: { _id: "$rating", count: { $sum: 1 } } },
-      { $sort: { _id: -1 } },
+    // All three reads are independent — run them in parallel.
+    const [ratings, total, breakdown] = await Promise.all([
+      ProviderRating.find(baseFilter)
+        .populate("customerId", "fullName")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .lean(),
+      ProviderRating.countDocuments(baseFilter),
+      ProviderRating.aggregate([
+        { $match: { ...baseFilter, providerId: new mongoose.Types.ObjectId(providerId) } },
+        { $group: { _id: "$rating", count: { $sum: 1 } } },
+        { $sort: { _id: -1 } },
+      ]),
     ]);
 
     const starMap = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
