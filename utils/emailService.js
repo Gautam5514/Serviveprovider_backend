@@ -713,6 +713,66 @@ View invoice: ${FRONTEND_URL}/bookings/${booking._id}
   });
 }
 
+// ─── Contact form confirmation ────────────────────────────────────────────────
+
+const CONTACT_TOPIC_LABEL = {
+  booking: "Booking Support",
+  payment: "Payment / Invoice",
+  provider: "Become a Partner",
+  complaint: "Service Complaint",
+  feedback: "Feedback",
+  other: "General Enquiry",
+};
+
+// Sent to the person who filled the Contact Us form — confirms receipt and
+// sets an expectation, the same way a real support desk would.
+async function sendContactConfirmationEmail(to, name, ticketNumber, topic) {
+  const topicLabel = CONTACT_TOPIC_LABEL[topic] || "General Enquiry";
+  const safeName = esc(name);
+
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">We've received your message</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+      Hi <strong style="color:${C.ink};">${safeName}</strong>, thanks for reaching out to EliteCrew.
+      Your message has been logged and our support team will get back to you shortly.
+    </p>
+
+    ${detailTable([
+      ["Reference No.", esc(ticketNumber)],
+      ["Topic", esc(topicLabel)],
+    ])}
+
+    ${notice(
+      "neutral",
+      "What happens next",
+      "Our team typically responds within 24 hours on business days. Keep this reference number handy if you follow up."
+    )}
+
+    ${ctaButton(`${FRONTEND_URL}/contact`, "Visit Support Center")}`;
+
+  const html = renderEmail({
+    preheader: `We've received your message (Ref: ${ticketNumber}) and will respond shortly.`,
+    badge: "Message Received",
+    badgeTone: "gold",
+    bodyHtml,
+    recipientEmail: to,
+    reason: "You received this email because you submitted the Contact Us form on EliteCrew.",
+  });
+
+  const text = `We've received your message
+
+Hi ${name}, thanks for reaching out to EliteCrew. Your message has been logged and our support team will get back to you shortly.
+
+Reference No.: ${ticketNumber}
+Topic: ${topicLabel}
+
+Our team typically responds within 24 hours on business days.
+
+— EliteCrew · Professional Home Services`;
+
+  await sendMail({ to, subject: `We've received your message — Ref ${ticketNumber}`, html, text });
+}
+
 module.exports = {
   sendOTPEmail,
   sendProviderDecisionEmail,
@@ -720,4 +780,5 @@ module.exports = {
   sendNewJobEmail,
   sendJobAcceptedEmail,
   sendJobCompletedEmail,
+  sendContactConfirmationEmail,
 };

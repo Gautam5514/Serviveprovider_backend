@@ -114,6 +114,7 @@ app.use("/api/testimonials",   require("./routes/testimonialRoutes"));
 app.use("/api/places",         require("./routes/placesRoutes"));
 app.use("/api/careers",        require("./routes/careerRoutes"));
 app.use("/api/blog",           require("./routes/blogRoutes"));
+app.use("/api/contact",        require("./routes/contactRoutes"));
 
 // ─── Static files (uploaded images / PDFs) ───────────────────────────────────
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
