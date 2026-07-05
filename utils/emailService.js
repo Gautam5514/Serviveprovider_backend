@@ -15,621 +15,630 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// ─── OTP Email ───────────────────────────────────────────────────────────────
+// ─── Design tokens (must stay email-client safe: tables, inline CSS, no flex,
+//     no gradients, no shadows — flat surfaces with hairline borders) ─────────
 
-function buildOTPEmail(otp, purpose) {
-  const isReset    = purpose === "forgot_password";
-  const isProvider = purpose === "provider_email_verify";
+const C = {
+  ink: "#09090b",      // primary text / black surfaces
+  body: "#52525b",     // body copy
+  muted: "#a1a1aa",    // secondary text
+  faint: "#d4d4d8",    // faintest text
+  line: "#e4e4e7",     // hairline borders
+  wash: "#fafafa",     // soft panel background
+  page: "#f4f4f5",     // page background
+  gold: "#C8A45C",     // brand accent
+  success: "#059669",
+  successWash: "#ecfdf5",
+  successLine: "#a7f3d0",
+  successInk: "#065f46",
+  danger: "#dc2626",
+  dangerWash: "#fef2f2",
+  dangerLine: "#fecaca",
+  dangerInk: "#7f1d1d",
+  warning: "#b45309",
+  warningWash: "#fffbeb",
+  warningLine: "#fde68a",
+  warningInk: "#78350f",
+};
 
-  const subject = isReset
-    ? "Reset Your Password — EliteCrew"
-    : "Your Verification Code — EliteCrew";
+const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif";
 
-  const accentColor = isReset ? "#dc2626" : "#2563eb";
-  const badgeBg     = isReset ? "#fef2f2" : "#eff6ff";
-  const badgeLabel  = isReset ? "Password Reset" : isProvider ? "Provider Verification" : "Email Verification";
-  const badgeColor  = isReset ? "#dc2626" : "#2563eb";
-  const headline    = isReset ? "Reset your password" : "Verify your email address";
+function esc(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-  const bodyText = isReset
-    ? "We received a request to reset the password on your EliteCrew account. Use the one-time code below to proceed. If you did not make this request, simply ignore this email \u2014 your account is safe."
-    : isProvider
-    ? "Welcome to EliteCrew. Complete your provider registration by verifying your email with the code below. This keeps your account secure."
-    : "Welcome to EliteCrew! One last step \u2014 enter the code below to verify your email and activate your account.";
+// ─── Shared building blocks ──────────────────────────────────────────────────
 
-  const digitCells = otp.split("").map(d =>
-    `<td style="padding:0 4px;">` +
-    `<div style="width:52px;height:68px;background:#09090b;border-radius:10px;` +
-    `text-align:center;line-height:68px;font-size:30px;font-weight:900;` +
-    `color:#ffffff;font-family:'Courier New',Courier,monospace;` +
-    `box-shadow:0 4px 12px rgba(0,0,0,0.25);">${d}</div></td>`
-  ).join("");
+const PILL_TONES = {
+  neutral: { bg: "#27272a", color: "#e4e4e7" },
+  gold:    { bg: C.gold,    color: "#09090b" },
+  success: { bg: C.success, color: "#ffffff" },
+  danger:  { bg: C.danger,  color: "#ffffff" },
+  warning: { bg: "#d97706", color: "#ffffff" },
+};
 
+function headerPill(label, tone) {
+  const t = PILL_TONES[tone] || PILL_TONES.neutral;
+  return `<span style="display:inline-block;background:${t.bg};color:${t.color};font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:5px 14px;border-radius:100px;">${label}</span>`;
+}
+
+function ctaButton(href, label) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+    <td align="center" style="padding:4px 0 0;">
+      <a href="${href}" style="display:inline-block;background:${C.ink};color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 36px;border-radius:10px;border:1px solid ${C.ink};">${label}</a>
+    </td>
+  </tr></table>`;
+}
+
+function notice(tone, title, text) {
+  const map = {
+    success: { bg: C.successWash, line: C.successLine, title: C.success, ink: C.successInk },
+    danger:  { bg: C.dangerWash,  line: C.dangerLine,  title: C.danger,  ink: C.dangerInk },
+    warning: { bg: C.warningWash, line: C.warningLine, title: C.warning, ink: C.warningInk },
+    neutral: { bg: C.wash,        line: C.line,        title: C.ink,     ink: C.body },
+  };
+  const t = map[tone] || map.neutral;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 24px;">
+    <tr><td style="background:${t.bg};border:1px solid ${t.line};border-radius:10px;padding:14px 18px;">
+      <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:${t.title};">${title}</p>
+      <p style="margin:0;font-size:13px;color:${t.ink};line-height:1.6;">${text}</p>
+    </td></tr>
+  </table>`;
+}
+
+function detailTable(rows) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${C.line};border-radius:10px;margin:0 0 24px;">
+    ${rows
+      .map(
+        ([label, value], i) => `<tr>
+      <td style="padding:12px 18px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:${C.muted};width:38%;${i > 0 ? `border-top:1px solid ${C.line};` : ""}">${label}</td>
+      <td style="padding:12px 18px;font-size:14px;font-weight:600;color:${C.ink};${i > 0 ? `border-top:1px solid ${C.line};` : ""}">${value}</td>
+    </tr>`
+      )
+      .join("")}
+  </table>`;
+}
+
+function checklist(items) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+    ${items
+      .map(
+        (item) => `<tr>
+      <td style="width:26px;padding:6px 0;vertical-align:top;">
+        <span style="display:inline-block;width:18px;height:18px;background:${C.successWash};border:1px solid ${C.successLine};border-radius:100px;text-align:center;line-height:17px;font-size:11px;font-weight:700;color:${C.success};">&#10003;</span>
+      </td>
+      <td style="padding:6px 0 6px 10px;font-size:14px;color:#27272a;line-height:1.5;vertical-align:top;">${item}</td>
+    </tr>`
+      )
+      .join("")}
+  </table>`;
+}
+
+/**
+ * One shell for every EliteCrew email so each message a user receives — OTP,
+ * approval, booking, invoice — looks like it came from the same company.
+ */
+function renderEmail({ preheader, badge, badgeTone, bodyHtml, recipientEmail, reason }) {
   const year = new Date().getFullYear();
-
-  const html = `<!DOCTYPE html>
+  const sentTo = recipientEmail
+    ? `This email was sent to <span style="color:#71717a;">${esc(recipientEmail)}</span>. `
+    : "";
+  return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
-  <title>${subject}</title>
+  <title>EliteCrew</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f1f5f9;">
-<tr><td align="center" style="padding:32px 16px 48px;">
+<body style="margin:0;padding:0;background-color:${C.page};font-family:${FONT};">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${preheader}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.page};">
+<tr><td align="center" style="padding:36px 16px 48px;">
 
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
-    style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;
-           overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.10);">
+    style="max-width:600px;width:100%;background:#ffffff;border:1px solid ${C.line};border-radius:10px;">
 
-    <tr><td style="background:${accentColor};height:5px;font-size:0;line-height:0;">&nbsp;</td></tr>
-
+    <!-- Brand header -->
     <tr>
-      <td style="background:#09090b;padding:28px 40px;">
+      <td style="background:${C.ink};padding:26px 40px;border-radius:9px 9px 0 0;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="vertical-align:middle;">
-            <span style="font-size:22px;font-weight:900;color:#ffffff;letter-spacing:-0.5px;">
-              Service<span style="color:#71717a;font-weight:400;">Market</span>
-            </span>
+            <span style="font-size:21px;font-weight:800;color:#ffffff;letter-spacing:-0.4px;">Elite<span style="color:${C.gold};">Crew</span></span>
           </td>
           <td align="right" style="vertical-align:middle;">
-            <span style="display:inline-block;background:${badgeBg};color:${badgeColor};
-              font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;
-              padding:5px 14px;border-radius:100px;">
-              ${badgeLabel}
-            </span>
+            ${headerPill(badge, badgeTone)}
           </td>
         </tr></table>
       </td>
     </tr>
+    <tr><td style="background:${C.gold};height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>
 
+    <!-- Body -->
+    <tr><td style="padding:40px 40px 36px;">${bodyHtml}</td></tr>
+
+    <!-- Footer -->
     <tr>
-      <td style="padding:44px 40px 40px;">
-
-        <h1 style="margin:0 0 10px;font-size:28px;font-weight:800;color:#09090b;
-          letter-spacing:-0.5px;line-height:1.2;">
-          ${headline}
-        </h1>
-        <p style="margin:0 0 36px;font-size:15px;color:#52525b;line-height:1.65;max-width:480px;">
-          ${bodyText}
-        </p>
-
-        <p style="margin:0 0 14px;font-size:10px;font-weight:800;letter-spacing:2.5px;
-          text-transform:uppercase;color:#94a3b8;">
-          Your One-Time Code
-        </p>
-
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
-          <tr>${digitCells}</tr>
-        </table>
-
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
-          style="margin:0 0 36px;">
-          <tr>
-            <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 18px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-                <td style="vertical-align:middle;">
-                  <span style="font-size:13px;font-weight:600;color:#475569;">
-                    Expires in <strong style="color:#09090b;">10 minutes</strong>
-                  </span>
-                </td>
-                <td align="right" style="vertical-align:middle;">
-                  <span style="font-size:12px;font-weight:600;color:#94a3b8;">
-                    Max&nbsp;<strong style="color:#09090b;">5&nbsp;attempts</strong>
-                  </span>
-                </td>
-              </tr></table>
-            </td>
-          </tr>
-        </table>
-
-        <div style="border-top:1px solid #f1f5f9;margin:0 0 28px;"></div>
-
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
-          <tr>
-            <td style="background:#fefce8;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;">
-              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-                <td style="width:22px;vertical-align:top;padding-top:2px;">
-                  <span style="font-size:16px;">&#128274;</span>
-                </td>
-                <td style="padding-left:10px;vertical-align:top;">
-                  <p style="margin:0 0 3px;font-size:11px;font-weight:800;color:#78350f;
-                    text-transform:uppercase;letter-spacing:0.8px;">Security Notice</p>
-                  <p style="margin:0;font-size:13px;color:#92400e;line-height:1.55;">
-                    Never share this code with anyone. EliteCrew will
-                    <strong style="color:#78350f;">never</strong> call or message you asking for your OTP.
-                  </p>
-                </td>
-              </tr></table>
-            </td>
-          </tr>
-        </table>
-
-      </td>
-    </tr>
-
-    <tr>
-      <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:22px 40px;">
+      <td style="background:${C.wash};border-top:1px solid ${C.line};padding:22px 40px;border-radius:0 0 9px 9px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           <td style="vertical-align:middle;">
-            <p style="margin:0 0 2px;font-size:13px;font-weight:800;color:#09090b;">EliteCrew</p>
-            <p style="margin:0;font-size:12px;color:#94a3b8;">Professional Home Services Platform</p>
+            <p style="margin:0 0 2px;font-size:13px;font-weight:700;color:${C.ink};">Elite<span style="color:${C.gold};">Crew</span></p>
+            <p style="margin:0;font-size:12px;color:${C.muted};">Professional Home Services</p>
           </td>
           <td align="right" style="vertical-align:middle;">
-            <p style="margin:0;font-size:11px;color:#cbd5e1;text-align:right;line-height:1.6;">
-              Automated notification<br/>Do not reply to this email
-            </p>
+            <p style="margin:0;font-size:11px;color:${C.faint};text-align:right;line-height:1.6;">Automated notification<br/>Please do not reply to this email</p>
           </td>
         </tr></table>
       </td>
     </tr>
-
   </table>
 
-  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
-    style="max-width:600px;width:100%;margin-top:20px;">
-    <tr>
-      <td align="center">
-        <p style="margin:0 0 4px;font-size:12px;color:#94a3b8;">
-          If you didn&rsquo;t request this, you can safely ignore this email.
-        </p>
-        <p style="margin:0;font-size:11px;color:#cbd5e1;">
-          &copy; ${year} EliteCrew &middot; Professional Home Services
-        </p>
-      </td>
-    </tr>
+  <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;margin-top:18px;">
+    <tr><td align="center" style="padding:0 8px;">
+      <p style="margin:0 0 4px;font-size:12px;color:${C.muted};line-height:1.6;">${sentTo}${reason}</p>
+      <p style="margin:0;font-size:11px;color:${C.faint};">&copy; ${year} EliteCrew &middot; Professional Home Services</p>
+    </td></tr>
   </table>
 
 </td></tr>
 </table>
 </body>
 </html>`;
-
-  return { subject, html };
 }
 
-
-async function sendOTPEmail(to, otp, purpose) {
-  const { subject, html } = buildOTPEmail(otp, purpose);
+async function sendMail({ to, subject, html, text, attachments }) {
   await transporter.sendMail({
     from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
     to,
     subject,
     html,
+    text,
+    attachments,
   });
 }
 
-// ─── Provider Decision Email ──────────────────────────────────────────────────
+// ─── OTP / verification emails ───────────────────────────────────────────────
 
-function buildDecisionEmail(providerName, decision, remarks) {
+function buildOTPEmail(otp, purpose, recipientEmail) {
+  const isReset = purpose === "forgot_password";
+  const isProvider = purpose === "provider_email_verify";
+
+  const subject = isReset
+    ? "Reset your EliteCrew password"
+    : `${otp} is your EliteCrew verification code`;
+
+  const badge = isReset ? "Password Reset" : isProvider ? "Partner Verification" : "Email Verification";
+  const headline = isReset ? "Reset your password" : "Confirm your email address";
+
+  const intro = isReset
+    ? "We received a request to reset the password on your EliteCrew account. Enter the code below to continue. If you didn't make this request, no action is needed — your account remains secure."
+    : isProvider
+    ? "Welcome to EliteCrew. To keep our platform safe for customers and partners, please confirm your email address with the code below to continue your registration."
+    : "Welcome to EliteCrew. Enter the code below to confirm your email address and activate your account.";
+
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">${headline}</h1>
+    <p style="margin:0 0 32px;font-size:14px;color:${C.body};line-height:1.7;">${intro}</p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 12px;">
+      <tr><td align="center" style="background:${C.wash};border:1px solid ${C.line};border-radius:10px;padding:28px 20px 24px;">
+        <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:${C.muted};">Your verification code</p>
+        <p style="margin:0;font-size:38px;font-weight:700;letter-spacing:12px;color:${C.ink};font-family:'Courier New',Courier,monospace;text-indent:12px;">${esc(otp)}</p>
+      </td></tr>
+    </table>
+
+    <p style="margin:0 0 32px;font-size:12px;color:${C.muted};text-align:center;">
+      Code expires in <strong style="color:${C.ink};">10 minutes</strong> &nbsp;&middot;&nbsp; Maximum <strong style="color:${C.ink};">5 attempts</strong>
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+      <tr><td style="border-top:1px solid ${C.line};padding:20px 0 0;">
+        <p style="margin:0;font-size:12px;color:${C.muted};line-height:1.7;">
+          <strong style="color:${C.body};">Keep this code private.</strong>
+          EliteCrew staff will never call, message, or email you asking for this code.
+          Anyone who asks for it is not from EliteCrew.
+        </p>
+      </td></tr>
+    </table>`;
+
+  const reason = isReset
+    ? "You received this email because a password reset was requested for your account."
+    : "You received this email because this address was used to sign up on EliteCrew.";
+
+  const html = renderEmail({
+    preheader: isReset
+      ? "Use this code to reset your EliteCrew password. It expires in 10 minutes."
+      : "Your EliteCrew verification code expires in 10 minutes.",
+    badge,
+    badgeTone: isReset ? "danger" : "gold",
+    bodyHtml,
+    recipientEmail,
+    reason,
+  });
+
+  const text = `${headline}
+
+${intro}
+
+Your verification code: ${otp}
+
+The code expires in 10 minutes (maximum 5 attempts).
+
+Keep this code private. EliteCrew staff will never call, message, or email you asking for this code.
+
+— EliteCrew · Professional Home Services`;
+
+  return { subject, html, text };
+}
+
+async function sendOTPEmail(to, otp, purpose) {
+  const { subject, html, text } = buildOTPEmail(otp, purpose, to);
+  await sendMail({ to, subject, html, text });
+}
+
+// ─── Provider decision emails (approved / rejected / suspended) ──────────────
+
+function buildDecisionEmail(providerName, decision, remarks, recipientEmail) {
+  const name = esc(providerName);
+  const safeRemarks = esc(remarks);
+
   if (decision === "approved") {
-    const subject = "🎉 Congratulations! You're Approved — EliteCrew";
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#f0fdf4;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;padding:40px 16px;">
-<tr><td align="center">
-<table width="580" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.10);">
-
-  <!-- Top accent bar -->
-  <tr><td style="background:linear-gradient(135deg,#059669,#10b981);height:6px;"></td></tr>
-
-  <!-- Header -->
-  <tr>
-    <td style="background:#000;padding:32px 40px 28px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td><span style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Service<span style="color:#a3a3a3;">Market</span></span></td>
-        <td align="right">
-          <span style="display:inline-block;background:#059669;color:#fff;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:5px 14px;border-radius:100px;">✓ Approved</span>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
-
-  <!-- Hero section -->
-  <tr>
-    <td style="padding:48px 40px 0;text-align:center;">
-      <div style="width:72px;height:72px;background:#ecfdf5;border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;border:2px solid #a7f3d0;">
-        <span style="font-size:36px;line-height:72px;display:block;">✅</span>
-      </div>
-      <h1 style="margin:0 0 10px;font-size:30px;font-weight:900;color:#09090b;letter-spacing:-0.5px;">Congratulations, ${providerName}!</h1>
-      <p style="margin:0 0 32px;font-size:16px;color:#059669;font-weight:600;">Your application has been approved.</p>
-    </td>
-  </tr>
-
-  <!-- Body -->
-  <tr>
-    <td style="padding:0 40px 40px;">
-      <p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.7;text-align:center;">
-        Your EliteCrew provider profile is now <strong style="color:#09090b;">live and active</strong>. Customers in your area can now find and book your services.
+    const subject = "You're approved — welcome to EliteCrew";
+    const bodyHtml = `
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
+        <tr><td style="background:${C.successWash};border:1px solid ${C.successLine};border-radius:100px;width:52px;height:52px;text-align:center;vertical-align:middle;">
+          <span style="font-size:24px;font-weight:700;color:${C.success};line-height:52px;">&#10003;</span>
+        </td></tr>
+      </table>
+      <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Congratulations, ${name} — you're approved</h1>
+      <p style="margin:0 0 28px;font-size:14px;color:${C.body};line-height:1.7;">
+        Our team has reviewed and verified your application. Your EliteCrew partner profile is now
+        <strong style="color:${C.ink};">live</strong>, and customers in your area can find and book your services.
       </p>
 
-      <!-- What's next card -->
-      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 32px;">
-        <tr>
-          <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 28px;">
-            <p style="margin:0 0 16px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">What you can do now</p>
-            <table cellpadding="0" cellspacing="0" border="0" width="100%">
-              <tr><td style="padding:6px 0;">
-                <table cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td style="width:24px;"><span style="color:#059669;font-size:16px;font-weight:900;">✓</span></td>
-                  <td style="font-size:14px;color:#1e293b;font-weight:500;padding-left:8px;">Receive job offers from customers nearby</td>
-                </tr></table>
-              </td></tr>
-              <tr><td style="padding:6px 0;">
-                <table cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td style="width:24px;"><span style="color:#059669;font-size:16px;font-weight:900;">✓</span></td>
-                  <td style="font-size:14px;color:#1e293b;font-weight:500;padding-left:8px;">Manage your availability and working hours</td>
-                </tr></table>
-              </td></tr>
-              <tr><td style="padding:6px 0;">
-                <table cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td style="width:24px;"><span style="color:#059669;font-size:16px;font-weight:900;">✓</span></td>
-                  <td style="font-size:14px;color:#1e293b;font-weight:500;padding-left:8px;">Build your rating by completing quality work</td>
-                </tr></table>
-              </td></tr>
-              <tr><td style="padding:6px 0;">
-                <table cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td style="width:24px;"><span style="color:#059669;font-size:16px;font-weight:900;">✓</span></td>
-                  <td style="font-size:14px;color:#1e293b;font-weight:500;padding-left:8px;">Get paid directly through the platform</td>
-                </tr></table>
-              </td></tr>
-            </table>
-          </td>
-        </tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${C.line};border-radius:10px;margin:0 0 24px;">
+        <tr><td style="padding:22px 24px;">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${C.muted};">What you can do now</p>
+          ${checklist([
+            "Receive job requests from customers near you",
+            "Set your availability and working hours",
+            "Build your rating with every completed job",
+            "Get paid securely through the platform",
+          ])}
+        </td></tr>
       </table>
 
-      <!-- Pro tip -->
-      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 36px;">
-        <tr>
-          <td style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;">
-            <p style="margin:0;font-size:13px;color:#92400e;line-height:1.5;">
-              <strong>💡 Pro tip:</strong> Make sure your availability schedule is up to date so customers can book you at the right times.
-            </p>
-          </td>
-        </tr>
-      </table>
+      ${notice(
+        "neutral",
+        "Tip from the team",
+        "Partners with an up-to-date availability schedule and a complete profile receive significantly more bookings in their first month."
+      )}
 
-      <!-- CTA Button -->
-      <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-        <td align="center">
-          <a href="${FRONTEND_URL}/login" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:16px 40px;border-radius:8px;">
-            Open EliteCrew →
-          </a>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
+      ${ctaButton(`${FRONTEND_URL}/login`, "Open your dashboard")}`;
 
-  <!-- Footer -->
-  <tr>
-    <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td>
-          <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#09090b;">EliteCrew</p>
-          <p style="margin:0;font-size:12px;color:#a1a1aa;">Professional Home Services Platform</p>
-        </td>
-        <td align="right" valign="middle">
-          <p style="margin:0;font-size:11px;color:#d4d4d8;text-align:right;">Automated notification<br/>Do not reply to this email</p>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
+    const html = renderEmail({
+      preheader: "Your partner profile is live. Customers in your area can now book your services.",
+      badge: "Approved",
+      badgeTone: "success",
+      bodyHtml,
+      recipientEmail,
+      reason: "You received this email because you applied to become an EliteCrew service partner.",
+    });
 
-</table>
-</td></tr>
-</table>
-</body></html>`;
-    return { subject, html };
+    const text = `Congratulations, ${providerName} — you're approved
+
+Our team has reviewed and verified your application. Your EliteCrew partner profile is now live, and customers in your area can find and book your services.
+
+What you can do now:
+- Receive job requests from customers near you
+- Set your availability and working hours
+- Build your rating with every completed job
+- Get paid securely through the platform
+
+Open your dashboard: ${FRONTEND_URL}/login
+
+— EliteCrew · Professional Home Services`;
+
+    return { subject, html, text };
   }
 
   if (decision === "rejected") {
-    const subject = "Application Update — EliteCrew";
-    const remarksBlock = remarks
-      ? `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 28px;">
-          <tr><td style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:18px 20px;">
-            <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:#dc2626;">Reason from Admin</p>
-            <p style="margin:0;font-size:14px;color:#7f1d1d;line-height:1.5;">${remarks}</p>
-          </td></tr>
-        </table>`
-      : "";
+    const subject = "An update on your EliteCrew application";
+    const remarksBlock = remarks ? notice("danger", "Note from our review team", safeRemarks) : "";
 
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#fafafa;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafafa;padding:40px 16px;">
-<tr><td align="center">
-<table width="580" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.08);">
-
-  <tr><td style="background:#dc2626;height:4px;"></td></tr>
-
-  <tr>
-    <td style="background:#000;padding:32px 40px 28px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td><span style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Service<span style="color:#a3a3a3;">Market</span></span></td>
-        <td align="right">
-          <span style="display:inline-block;background:#dc2626;color:#fff;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:5px 14px;border-radius:100px;">Application Update</span>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
-
-  <tr>
-    <td style="padding:48px 40px 40px;">
-      <h1 style="margin:0 0 12px;font-size:26px;font-weight:900;color:#09090b;letter-spacing:-0.5px;">Hi ${providerName},</h1>
-      <p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.7;">
-        Thank you for applying to join EliteCrew as a service provider. After carefully reviewing your application, we're <strong style="color:#09090b;">unable to approve it at this time</strong>.
+    const bodyHtml = `
+      <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Hi ${name},</h1>
+      <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+        Thank you for applying to become an EliteCrew service partner. After carefully reviewing your
+        application, we're unable to approve it at this time.
       </p>
 
       ${remarksBlock}
 
-      <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 32px;">
-        <tr>
-          <td style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px 28px;">
-            <p style="margin:0 0 14px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Common reasons for rejection</p>
-            <table cellpadding="0" cellspacing="0" border="0" width="100%">
-              <tr><td style="padding:5px 0;font-size:13px;color:#475569;">· Missing or unclear KYC documents (Aadhaar, PAN, Selfie)</td></tr>
-              <tr><td style="padding:5px 0;font-size:13px;color:#475569;">· Incomplete profile information</td></tr>
-              <tr><td style="padding:5px 0;font-size:13px;color:#475569;">· Services listed don't match experience provided</td></tr>
-              <tr><td style="padding:5px 0;font-size:13px;color:#475569;">· Missing or incomplete agreement acceptance</td></tr>
-            </table>
-          </td>
-        </tr>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${C.line};border-radius:10px;margin:0 0 24px;">
+        <tr><td style="padding:22px 24px;">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:${C.muted};">The most common reasons</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+            <tr><td style="padding:5px 0;font-size:13px;color:${C.body};line-height:1.6;">&middot;&nbsp; KYC documents missing or unclear (Aadhaar, PAN, selfie)</td></tr>
+            <tr><td style="padding:5px 0;font-size:13px;color:${C.body};line-height:1.6;">&middot;&nbsp; Incomplete profile information</td></tr>
+            <tr><td style="padding:5px 0;font-size:13px;color:${C.body};line-height:1.6;">&middot;&nbsp; Listed services don't match the experience provided</td></tr>
+            <tr><td style="padding:5px 0;font-size:13px;color:${C.body};line-height:1.6;">&middot;&nbsp; Partner agreement not fully accepted</td></tr>
+          </table>
+        </td></tr>
       </table>
 
-      <p style="margin:0 0 36px;font-size:14px;color:#71717a;line-height:1.6;">
-        You are welcome to <strong style="color:#09090b;">reapply</strong> after addressing the issues above. Please ensure all required documents are clearly uploaded and your profile is complete.
+      <p style="margin:0 0 28px;font-size:14px;color:${C.body};line-height:1.7;">
+        You're welcome to <strong style="color:${C.ink};">update and resubmit your application</strong> once
+        the points above are addressed. Clear document photos and a complete profile make approval much faster.
       </p>
 
-      <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-        <td align="center">
-          <a href="${FRONTEND_URL}/login" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 36px;border-radius:8px;">
-            Update My Application →
-          </a>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
+      ${ctaButton(`${FRONTEND_URL}/login`, "Update my application")}`;
 
-  <tr>
-    <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td>
-          <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#09090b;">EliteCrew</p>
-          <p style="margin:0;font-size:12px;color:#a1a1aa;">Professional Home Services Platform</p>
-        </td>
-        <td align="right" valign="middle">
-          <p style="margin:0;font-size:11px;color:#d4d4d8;text-align:right;">Automated notification<br/>Do not reply to this email</p>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
+    const html = renderEmail({
+      preheader: "Your application needs some changes before it can be approved. You can update and resubmit anytime.",
+      badge: "Application Update",
+      badgeTone: "neutral",
+      bodyHtml,
+      recipientEmail,
+      reason: "You received this email because you applied to become an EliteCrew service partner.",
+    });
 
-</table>
-</td></tr>
-</table>
-</body></html>`;
-    return { subject, html };
+    const text = `Hi ${providerName},
+
+Thank you for applying to become an EliteCrew service partner. After carefully reviewing your application, we're unable to approve it at this time.
+${remarks ? `\nNote from our review team: ${remarks}\n` : ""}
+The most common reasons:
+- KYC documents missing or unclear (Aadhaar, PAN, selfie)
+- Incomplete profile information
+- Listed services don't match the experience provided
+- Partner agreement not fully accepted
+
+You're welcome to update and resubmit your application once the points above are addressed.
+
+Update my application: ${FRONTEND_URL}/login
+
+— EliteCrew · Professional Home Services`;
+
+    return { subject, html, text };
   }
 
   if (decision === "suspended") {
-    const subject = "Account Suspended — EliteCrew";
-    const remarksBlock = remarks
-      ? `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 28px;">
-          <tr><td style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:18px 20px;">
-            <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:#c2410c;">Reason</p>
-            <p style="margin:0;font-size:14px;color:#7c2d12;line-height:1.5;">${remarks}</p>
-          </td></tr>
-        </table>`
-      : "";
+    const subject = "Your EliteCrew partner account has been suspended";
+    const remarksBlock = remarks ? notice("warning", "Reason for suspension", safeRemarks) : "";
 
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#fafafa;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fafafa;padding:40px 16px;">
-<tr><td align="center">
-<table width="580" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.08);">
-
-  <tr><td style="background:#f97316;height:4px;"></td></tr>
-
-  <tr>
-    <td style="background:#000;padding:32px 40px 28px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td><span style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Service<span style="color:#a3a3a3;">Market</span></span></td>
-        <td align="right">
-          <span style="display:inline-block;background:#f97316;color:#fff;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:5px 14px;border-radius:100px;">⚠ Suspended</span>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
-
-  <tr>
-    <td style="padding:48px 40px 40px;">
-      <h1 style="margin:0 0 12px;font-size:26px;font-weight:900;color:#09090b;letter-spacing:-0.5px;">Account Suspended</h1>
-      <p style="margin:0 0 28px;font-size:15px;color:#52525b;line-height:1.7;">
-        Hi <strong>${providerName}</strong>, your EliteCrew provider account has been <strong style="color:#09090b;">temporarily suspended</strong>. You will not receive new job offers during this period.
+    const bodyHtml = `
+      <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Hi ${name},</h1>
+      <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+        Your EliteCrew partner account has been <strong style="color:${C.ink};">temporarily suspended</strong>.
+        While suspended, you will not receive new job requests and your profile is hidden from customers.
       </p>
+
       ${remarksBlock}
-      <p style="margin:0 0 36px;font-size:14px;color:#71717a;line-height:1.6;">
-        Please contact our support team to understand the next steps and resolve any outstanding issues.
+
+      <p style="margin:0 0 28px;font-size:14px;color:${C.body};line-height:1.7;">
+        To understand what happened and the steps to restore your account, please get in touch with our
+        support team — we'll walk you through it.
       </p>
-      <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-        <td align="center">
-          <a href="${FRONTEND_URL}/login" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 36px;border-radius:8px;">
-            Contact Support →
-          </a>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
 
-  <tr>
-    <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td>
-          <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#09090b;">EliteCrew</p>
-          <p style="margin:0;font-size:12px;color:#a1a1aa;">Professional Home Services Platform</p>
-        </td>
-        <td align="right" valign="middle">
-          <p style="margin:0;font-size:11px;color:#d4d4d8;text-align:right;">Automated notification<br/>Do not reply to this email</p>
-        </td>
-      </tr></table>
-    </td>
-  </tr>
+      ${ctaButton(`${FRONTEND_URL}/login`, "Contact support")}`;
 
-</table>
-</td></tr>
-</table>
-</body></html>`;
-    return { subject, html };
+    const html = renderEmail({
+      preheader: "Your partner account is temporarily suspended. Contact support to resolve this.",
+      badge: "Account Suspended",
+      badgeTone: "warning",
+      bodyHtml,
+      recipientEmail,
+      reason: "You received this email because of a status change on your EliteCrew partner account.",
+    });
+
+    const text = `Hi ${providerName},
+
+Your EliteCrew partner account has been temporarily suspended. While suspended, you will not receive new job requests and your profile is hidden from customers.
+${remarks ? `\nReason for suspension: ${remarks}\n` : ""}
+To understand what happened and the steps to restore your account, please contact our support team.
+
+Contact support: ${FRONTEND_URL}/login
+
+— EliteCrew · Professional Home Services`;
+
+    return { subject, html, text };
   }
 
   return null;
 }
 
 async function sendProviderDecisionEmail(to, providerName, decision, remarks) {
-  const result = buildDecisionEmail(providerName, decision, remarks);
+  const result = buildDecisionEmail(providerName, decision, remarks, to);
   if (!result) return;
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
-    to,
-    subject: result.subject,
-    html: result.html,
-  });
+  await sendMail({ to, subject: result.subject, html: result.html, text: result.text });
 }
 
 // ─── Booking notification emails ─────────────────────────────────────────────
 
-function emailShell(accentColor, badgeLabel, bodyHtml) {
-  return `<!DOCTYPE html><html lang="en">
-<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#f4f4f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f4f4f5;padding:40px 16px;">
-<tr><td align="center">
-<table width="580" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-  <tr><td style="background:${accentColor};height:4px;"></td></tr>
-  <tr>
-    <td style="background:#000;padding:28px 40px 24px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td><span style="font-size:20px;font-weight:900;color:#fff;letter-spacing:-0.5px;">Service<span style="color:#a3a3a3;">Market</span></span></td>
-        <td align="right"><span style="display:inline-block;background:${accentColor};color:#fff;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:4px 12px;border-radius:100px;">${badgeLabel}</span></td>
-      </tr></table>
-    </td>
-  </tr>
-  <tr><td style="padding:36px 40px 32px;">${bodyHtml}</td></tr>
-  <tr>
-    <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:20px 40px;">
-      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-        <td><p style="margin:0;font-size:12px;font-weight:700;color:#09090b;">EliteCrew</p><p style="margin:0;font-size:11px;color:#a1a1aa;">Professional Home Services</p></td>
-        <td align="right"><p style="margin:0;font-size:11px;color:#d4d4d8;text-align:right;">Automated notification.<br/>Do not reply.</p></td>
-      </tr></table>
-    </td>
-  </tr>
-</table>
-<p style="margin:16px 0 0;font-size:11px;color:#a1a1aa;text-align:center;">© ${new Date().getFullYear()} EliteCrew</p>
-</td></tr></table>
-</body></html>`;
+function bookingDetailRows(b) {
+  const date = new Date(b.scheduledDate).toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const slot = b.scheduledTimeSlot || "";
+  return [
+    ["Booking No.", esc(b.bookingNumber || "—")],
+    ["Service", esc(b.serviceName)],
+    ["Date", esc(date + (slot ? " · " + slot : ""))],
+    ["Address", esc(`${b.address?.text || ""}, ${b.address?.city || ""}`)],
+    ["Payment", b.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"],
+    ["Total", `₹${(b.pricing?.totalAmount || 0).toLocaleString("en-IN")}`],
+  ];
 }
 
-function bookingInfoBlock(b) {
-  const date = new Date(b.scheduledDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-  const slot = b.scheduledTimeSlot || "";
-  const rows = [
-    ["Booking No.",  b.bookingNumber || "—"],
-    ["Service",      b.serviceName],
-    ["Date",         date + (slot ? " · " + slot : "")],
-    ["Address",      `${b.address?.text || ""}, ${b.address?.city || ""}`],
-    ["Payment",      b.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"],
-    ["Total",        `₹${(b.pricing?.totalAmount || 0).toLocaleString("en-IN")}`],
-  ];
-  return `<table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin:24px 0;">
-    ${rows.map((r, i) => `<tr style="${i > 0 ? "border-top:1px solid #e2e8f0;" : ""}">
-      <td style="padding:10px 16px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#94a3b8;width:38%;">${r[0]}</td>
-      <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#1e293b;">${r[1]}</td>
-    </tr>`).join("")}
-  </table>`;
+function bookingDetailsText(b) {
+  return bookingDetailRows(b)
+    .map(([label, value]) => `${label}: ${value.replace(/&amp;/g, "&")}`)
+    .join("\n");
 }
 
 // Booking confirmed → customer
 async function sendBookingConfirmedEmail(to, name, booking) {
-  const body = `
-    <h2 style="margin:0 0 6px;font-size:24px;font-weight:900;color:#09090b;">Booking Confirmed!</h2>
-    <p style="margin:0 0 4px;font-size:15px;color:#52525b;">Hi <strong>${name}</strong>, your booking has been received.</p>
-    <p style="margin:0 0 24px;font-size:14px;color:#71717a;">We're finding the best available technician for you. You'll receive an update when a provider is confirmed.</p>
-    ${bookingInfoBlock(booking)}
-    <p style="margin:0 0 8px;font-size:13px;color:#52525b;font-weight:600;">Your verification OTP</p>
-    <p style="margin:0 0 24px;font-size:13px;color:#71717a;">Share the 4-digit OTP on your booking details page with the technician when they arrive to start the job.</p>
-    <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-      <td align="center">
-        <a href="${FRONTEND_URL}/bookings/${booking._id}" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:12px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 32px;border-radius:8px;">View Booking →</a>
-      </td>
-    </tr></table>`;
+  const safeName = esc(name);
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Your booking is confirmed</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+      Hi <strong style="color:${C.ink};">${safeName}</strong>, we've received your booking.
+      We're matching you with the best available professional — you'll get another update
+      the moment your technician is confirmed.
+    </p>
 
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
+    ${detailTable(bookingDetailRows(booking))}
+
+    ${notice(
+      "neutral",
+      "Your start-of-job OTP",
+      "A 4-digit OTP is shown on your booking page. Share it with the technician only when they arrive — it confirms the right professional is at your door and starts the job."
+    )}
+
+    ${ctaButton(`${FRONTEND_URL}/bookings/${booking._id}`, "View my booking")}`;
+
+  const html = renderEmail({
+    preheader: `Booking ${booking.bookingNumber || ""} received — we're assigning your professional now.`,
+    badge: "Booking Confirmed",
+    badgeTone: "gold",
+    bodyHtml,
+    recipientEmail: to,
+    reason: "You received this email because you placed a booking on EliteCrew.",
+  });
+
+  const text = `Your booking is confirmed
+
+Hi ${name}, we've received your booking. We're matching you with the best available professional — you'll get another update the moment your technician is confirmed.
+
+${bookingDetailsText(booking)}
+
+Your start-of-job OTP: a 4-digit OTP is shown on your booking page. Share it with the technician only when they arrive.
+
+View my booking: ${FRONTEND_URL}/bookings/${booking._id}
+
+— EliteCrew · Professional Home Services`;
+
+  await sendMail({
     to,
-    subject: `Booking Confirmed — ${booking.serviceName} | EliteCrew`,
-    html: emailShell("#000000", "Booking Confirmed", body),
+    subject: `Booking confirmed · ${booking.serviceName} · ${booking.bookingNumber || ""} — EliteCrew`,
+    html,
+    text,
   });
 }
 
 // New job assigned → provider
 async function sendNewJobEmail(to, providerName, booking, customerName = "") {
-  const date = new Date(booking.scheduledDate).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
-  const customerLine = customerName ? `<p style="margin:0 0 4px;font-size:13px;color:#64748b;">Customer: <strong style="color:#1e293b;">${customerName}</strong></p>` : "";
-  const body = `
-    <h2 style="margin:0 0 6px;font-size:24px;font-weight:900;color:#09090b;">New Job Assigned</h2>
-    <p style="margin:0 0 8px;font-size:15px;color:#52525b;">Hi <strong>${providerName}</strong>, you have a new job request. Please accept or reject it promptly.</p>
-    ${customerLine}
-    ${bookingInfoBlock(booking)}
-    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px 20px;margin:0 0 24px;">
-      <tr><td><p style="margin:0;font-size:13px;color:#92400e;"><strong>⚡ Action required:</strong> Log in to your dashboard to accept this job. If you don't respond in time, it will be reassigned.</p></td></tr>
-    </table>
-    <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-      <td align="center">
-        <a href="${FRONTEND_URL}/dashboard/provider/orders" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:12px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 32px;border-radius:8px;">View in Dashboard →</a>
-      </td>
-    </tr></table>`;
+  const date = new Date(booking.scheduledDate).toLocaleDateString("en-IN", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  });
+  const rows = bookingDetailRows(booking);
+  if (customerName) rows.splice(1, 0, ["Customer", esc(customerName)]);
 
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">You have a new job request</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+      Hi <strong style="color:${C.ink};">${esc(providerName)}</strong>, a customer has booked your service.
+      Please review the details and respond from your dashboard.
+    </p>
+
+    ${detailTable(rows)}
+
+    ${notice(
+      "warning",
+      "Action required",
+      "Accept this job from your dashboard as soon as possible. If there's no response in time, the job will be offered to another partner."
+    )}
+
+    ${ctaButton(`${FRONTEND_URL}/dashboard/provider/orders`, "Review job request")}`;
+
+  const html = renderEmail({
+    preheader: `${booking.serviceName} on ${date} — accept from your dashboard before it's reassigned.`,
+    badge: "New Job",
+    badgeTone: "warning",
+    bodyHtml,
+    recipientEmail: to,
+    reason: "You received this email because you're a registered EliteCrew service partner.",
+  });
+
+  const text = `You have a new job request
+
+Hi ${providerName}, a customer has booked your service. Please review the details and respond from your dashboard.
+
+${customerName ? `Customer: ${customerName}\n` : ""}${bookingDetailsText(booking)}
+
+Action required: accept this job from your dashboard as soon as possible. If there's no response in time, the job will be offered to another partner.
+
+Review job request: ${FRONTEND_URL}/dashboard/provider/orders
+
+— EliteCrew · Professional Home Services`;
+
+  await sendMail({
     to,
-    subject: `New Job: ${booking.serviceName} on ${date} | EliteCrew`,
-    html: emailShell("#f59e0b", "New Job", body),
+    subject: `New job request: ${booking.serviceName} on ${date} — EliteCrew`,
+    html,
+    text,
   });
 }
 
 // Provider accepted → customer
 async function sendJobAcceptedEmail(to, customerName, booking, providerName) {
-  const body = `
-    <h2 style="margin:0 0 6px;font-size:24px;font-weight:900;color:#09090b;">Provider Confirmed! ✓</h2>
-    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">Hi <strong>${customerName}</strong>, <strong>${providerName}</strong> has confirmed your booking and will be there on schedule.</p>
-    ${bookingInfoBlock(booking)}
-    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px 20px;margin:0 0 24px;">
-      <tr><td><p style="margin:0;font-size:13px;color:#065f46;"><strong>🔑 Remember:</strong> Share your OTP (shown on the booking page) with the technician when they arrive — this starts the job.</p></td></tr>
-    </table>
-    <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-      <td align="center">
-        <a href="${FRONTEND_URL}/bookings/${booking._id}" style="display:inline-block;background:#059669;color:#fff;text-decoration:none;font-size:12px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 32px;border-radius:8px;">View Booking & OTP →</a>
-      </td>
-    </tr></table>`;
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Your professional is confirmed</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+      Hi <strong style="color:${C.ink};">${esc(customerName)}</strong>,
+      <strong style="color:${C.ink};">${esc(providerName)}</strong> has accepted your booking
+      and will arrive as scheduled.
+    </p>
 
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
+    ${detailTable(bookingDetailRows(booking))}
+
+    ${notice(
+      "success",
+      "When your technician arrives",
+      "Share the 4-digit OTP from your booking page with the technician at your door. The job starts only after you share it — that's how we keep every visit verified and safe."
+    )}
+
+    ${ctaButton(`${FRONTEND_URL}/bookings/${booking._id}`, "View booking & OTP")}`;
+
+  const html = renderEmail({
+    preheader: `${providerName} has accepted your booking and will arrive as scheduled.`,
+    badge: "Professional Confirmed",
+    badgeTone: "success",
+    bodyHtml,
+    recipientEmail: to,
+    reason: "You received this email because you placed a booking on EliteCrew.",
+  });
+
+  const text = `Your professional is confirmed
+
+Hi ${customerName}, ${providerName} has accepted your booking and will arrive as scheduled.
+
+${bookingDetailsText(booking)}
+
+When your technician arrives: share the 4-digit OTP from your booking page with the technician at your door. The job starts only after you share it.
+
+View booking & OTP: ${FRONTEND_URL}/bookings/${booking._id}
+
+— EliteCrew · Professional Home Services`;
+
+  await sendMail({
     to,
-    subject: `${providerName} is confirmed for your booking | EliteCrew`,
-    html: emailShell("#059669", "Provider Confirmed", body),
+    subject: `${providerName} is confirmed for your ${booking.serviceName} — EliteCrew`,
+    html,
+    text,
   });
 }
 
-// Job completed -> customer receipt with PDF invoice
+// Job completed → customer receipt with PDF invoice
 async function sendJobCompletedEmail(to, customerName, booking, providerInfo = {}) {
   const total = booking.pricing?.totalAmount || 0;
   const invoicePdf = await generateInvoicePdf({
@@ -638,36 +647,62 @@ async function sendJobCompletedEmail(to, customerName, booking, providerInfo = {
     providerName: providerInfo.providerName,
     providerPhone: providerInfo.providerPhone,
   });
-  const body = `
-    <h2 style="margin:0 0 6px;font-size:24px;font-weight:900;color:#09090b;">Invoice Ready</h2>
-    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">Hi <strong>${customerName}</strong>, your <strong>${booking.serviceName}</strong> service is complete. Your PDF invoice is attached for your records, and the printable invoice is also available in your booking page.</p>
-    ${bookingInfoBlock(booking)}
-    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin:0 0 24px;">
+
+  const bodyHtml = `
+    <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Service complete — your invoice is ready</h1>
+    <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+      Hi <strong style="color:${C.ink};">${esc(customerName)}</strong>, your
+      <strong style="color:${C.ink};">${esc(booking.serviceName)}</strong> service has been completed.
+      Your PDF invoice is attached, and a printable copy is always available on your booking page.
+    </p>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${C.line};border-radius:10px;margin:0 0 24px;">
       <tr>
-        <td style="background:#09090b;color:#fff;padding:18px 22px;">
-          <p style="margin:0;font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#a1a1aa;">Invoice Summary</p>
-          <p style="margin:6px 0 0;font-size:22px;font-weight:900;">₹${total.toLocaleString("en-IN")}</p>
+        <td style="background:${C.ink};padding:20px 24px;border-radius:9px 9px 0 0;">
+          <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:${C.muted};">Amount paid</p>
+          <p style="margin:0;font-size:26px;font-weight:800;color:#ffffff;">₹${total.toLocaleString("en-IN")}</p>
         </td>
       </tr>
-      <tr><td style="padding:16px 22px;background:#fff;">
-        <p style="margin:0 0 6px;font-size:13px;color:#52525b;">Invoice No: <strong style="color:#09090b;">${booking.bookingNumber}</strong></p>
-        <p style="margin:0;font-size:13px;color:#52525b;">Payment: <strong style="color:#09090b;">${booking.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"}</strong></p>
+      <tr><td style="padding:16px 24px;">
+        <p style="margin:0 0 6px;font-size:13px;color:${C.body};">Invoice No: <strong style="color:${C.ink};">${esc(booking.bookingNumber)}</strong></p>
+        <p style="margin:0;font-size:13px;color:${C.body};">Payment method: <strong style="color:${C.ink};">${booking.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"}</strong></p>
       </td></tr>
     </table>
-    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px 20px;margin:0 0 24px;">
-      <tr><td><p style="margin:0;font-size:13px;color:#065f46;"><strong>Record saved:</strong> Keep the invoice for payment proof, service history, and any future query with the same provider.</p></td></tr>
-    </table>
-    <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-      <td align="center">
-        <a href="${FRONTEND_URL}/bookings/${booking._id}" style="display:inline-block;background:#000;color:#fff;text-decoration:none;font-size:12px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 32px;border-radius:8px;">View Invoice</a>
-      </td>
-    </tr></table>`;
 
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
+    ${notice(
+      "neutral",
+      "For your records",
+      "Keep this invoice as proof of payment. It's also useful for your service history and any future request with the same professional."
+    )}
+
+    ${ctaButton(`${FRONTEND_URL}/bookings/${booking._id}`, "View invoice")}`;
+
+  const html = renderEmail({
+    preheader: `Invoice ${booking.bookingNumber} for ₹${total.toLocaleString("en-IN")} is attached.`,
+    badge: "Invoice",
+    badgeTone: "success",
+    bodyHtml,
+    recipientEmail: to,
+    reason: "You received this email because a booking you placed on EliteCrew was completed.",
+  });
+
+  const text = `Service complete — your invoice is ready
+
+Hi ${customerName}, your ${booking.serviceName} service has been completed. Your PDF invoice is attached.
+
+Amount paid: ₹${total.toLocaleString("en-IN")}
+Invoice No: ${booking.bookingNumber}
+Payment method: ${booking.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"}
+
+View invoice: ${FRONTEND_URL}/bookings/${booking._id}
+
+— EliteCrew · Professional Home Services`;
+
+  await sendMail({
     to,
-    subject: `Invoice Ready — ${booking.bookingNumber} | EliteCrew`,
-    html: emailShell("#059669", "Invoice Ready", body),
+    subject: `Your invoice ${booking.bookingNumber} — EliteCrew`,
+    html,
+    text,
     attachments: [
       {
         filename: `EliteCrew-Invoice-${booking.bookingNumber || booking._id}.pdf`,
