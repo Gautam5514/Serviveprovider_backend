@@ -4,11 +4,17 @@ const SupportTicketSchema = new mongoose.Schema(
   {
     ticketNumber: { type: String, unique: true },
 
-    customerId:   { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    // The customer or provider who raised the ticket.
+    userId:   { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    userRole: { type: String, enum: ["customer", "provider"], required: true },
+
+    // Optional — lets the requester point support straight at the booking
+    // that has the issue (provider no-show, payment not completed, etc.).
+    bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking", default: null },
 
     category: {
       type: String,
-      enum: ["booking_issue", "payment_issue", "provider_complaint", "app_bug", "general"],
+      enum: ["booking_issue", "payment_issue", "provider_complaint", "customer_issue", "app_bug", "general"],
       required: true,
     },
 
@@ -21,9 +27,9 @@ const SupportTicketSchema = new mongoose.Schema(
       default: "open",
     },
 
-    lastMessageAt:    { type: Date, default: Date.now },
-    unreadByAdmin:    { type: Number, default: 0 },
-    unreadByCustomer: { type: Number, default: 0 },
+    lastMessageAt:     { type: Date, default: Date.now },
+    unreadByAdmin:     { type: Number, default: 0 },
+    unreadByRequester: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
@@ -38,8 +44,9 @@ SupportTicketSchema.pre("save", function (next) {
   next();
 });
 
-SupportTicketSchema.index({ customerId: 1, createdAt: -1 });
+SupportTicketSchema.index({ userId: 1, createdAt: -1 });
 SupportTicketSchema.index({ status: 1, lastMessageAt: -1 });
+SupportTicketSchema.index({ userRole: 1, status: 1 });
 
 module.exports =
   mongoose.models.SupportTicket || mongoose.model("SupportTicket", SupportTicketSchema);

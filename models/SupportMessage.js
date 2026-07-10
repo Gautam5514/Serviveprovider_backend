@@ -4,7 +4,7 @@ const SupportMessageSchema = new mongoose.Schema(
   {
     ticketId:   { type: mongoose.Schema.Types.ObjectId, ref: "SupportTicket", required: true },
     senderId:   { type: mongoose.Schema.Types.ObjectId, ref: "User",          required: true },
-    senderRole: { type: String, enum: ["customer", "admin"],                  required: true },
+    senderRole: { type: String, enum: ["customer", "provider", "admin"],      required: true },
     senderName: { type: String, required: true, trim: true },
     text:       { type: String, required: true, trim: true, maxlength: 2000  },
   },

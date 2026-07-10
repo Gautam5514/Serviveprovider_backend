@@ -10,6 +10,7 @@ const { SERVICE_CATEGORIES, canonicalCategory } = require("../constants/categori
 const {
   sendJobCompletedEmail,
 } = require("../utils/emailService");
+const { generateInvoicePdf } = require("../utils/invoicePdf");
 const { createNotification, notifyMany } = require("../utils/notificationService");
 const { emitToUser } = require("../socket");
 
@@ -43,6 +44,16 @@ const SERVICE_CATEGORY_KEYWORDS = {
   electrical: ["electric", "electrical", "wiring", "switch", "socket", "mcb"],
   appliance: ["appliance", "fridge", "refrigerator", "washing", "geyser", "microwave"],
   cleaning: ["clean", "cleaning", "bathroom", "kitchen", "sofa", "housekeeping"],
+  plumbing: ["plumb", "plumber", "pipe", "tap", "mixer", "flush", "drain", "leak", "water tank"],
+  carpentry: ["carpenter", "carpentry", "wood", "furniture", "door", "lock", "curtain rod"],
+  "pest-control": ["pest", "cockroach", "termite", "bed bug", "mosquito", "insect"],
+  painting: ["paint", "painting", "painter", "wall", "dampness", "texture"],
+  laundry: ["laundry", "cloth", "clothes", "dry clean", "ironing", "shoe cleaning", "curtain"],
+  "car-wash": ["car wash", "vehicle wash", "car cleaning", "car detailing", "bike wash"],
+  beauty: ["beauty", "salon", "facial", "manicure", "pedicure", "waxing", "haircut"],
+  grooming: ["grooming", "barber", "haircut", "beard", "massage"],
+  moving: ["moving", "shifting", "packer", "mover", "furniture moving"],
+  gardening: ["garden", "gardening", "plant", "lawn", "mowing"],
   // "other" is a catch-all — providers match it only by explicitly listing the
   // category on their profile, never via keyword inference.
   other: [],
@@ -414,6 +425,46 @@ const getBookingById = async (req, res) => {
     }
 
     res.json({ success: true, booking: data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /api/bookings/:id/invoice ────────────────────────────────────────────
+const getBookingInvoice = async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id)
+      .populate({ path: "providerId", populate: { path: "userId", select: "fullName phone" } })
+      .populate("customerId", "fullName phone");
+
+    if (!booking) return res.status(404).json({ success: false, message: "Booking not found" });
+
+    const userId     = req.user._id.toString();
+    const isCustomer = booking.customerId?._id?.toString() === userId || booking.customerId?.toString() === userId;
+    const isProvider = booking.providerId?.userId?._id?.toString() === userId;
+    const isAdmin    = req.user.role === "admin";
+
+    if (!isCustomer && !isProvider && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Access denied" });
+    }
+
+    if (booking.status !== "completed") {
+      return res.status(400).json({ success: false, message: "Invoice is only available once the job is completed" });
+    }
+
+    const pdfBuffer = await generateInvoicePdf({
+      booking,
+      customerName:   booking.customerId?.fullName,
+      providerName:   booking.providerId?.userId?.fullName,
+      providerPhone:  booking.providerId?.userId?.phone,
+    });
+
+    res.set({
+      "Content-Type":        "application/pdf",
+      "Content-Disposition": `attachment; filename="EliteCrew-Invoice-${booking.bookingNumber || booking._id}.pdf"`,
+      "Content-Length":      pdfBuffer.length,
+    });
+    res.send(pdfBuffer);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -1153,6 +1204,7 @@ module.exports = {
   createBooking,
   getMyBookings,
   getBookingById,
+  getBookingInvoice,
   cancelBooking,
   getProviderJobs,
   getAvailableJobs,

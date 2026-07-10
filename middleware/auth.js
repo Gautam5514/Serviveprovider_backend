@@ -47,4 +47,11 @@ const customerOnly = (req, res, next) => {
   next();
 };
 
-module.exports = { protect, providerOnly, adminOnly, customerOnly };
+const customerOrProviderOnly = (req, res, next) => {
+  if (!["customer", "provider"].includes(req.user?.role)) {
+    return res.status(403).json({ success: false, message: "Customer or provider access only" });
+  }
+  next();
+};
+
+module.exports = { protect, providerOnly, adminOnly, customerOnly, customerOrProviderOnly };

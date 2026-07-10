@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { SERVICE_CATEGORIES } = require("../constants/categories");
 
 const CouponSchema = new mongoose.Schema(
   {
@@ -12,7 +13,7 @@ const CouponSchema = new mongoose.Schema(
     expiresAt:    { type: Date, required: true },
     applicableCategories: {
       type: [String],
-      enum: ["ac", "cooler", "fan", "tv", "electrical", "appliance"],
+      enum: SERVICE_CATEGORIES,
       default: [],            // empty = valid for all categories
     },
     isActive:     { type: Boolean, default: true },

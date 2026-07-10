@@ -1,6 +1,6 @@
 const express = require("express");
 const router  = express.Router();
-const { protect, customerOnly, adminOnly } = require("../middleware/auth");
+const { protect, customerOrProviderOnly, adminOnly } = require("../middleware/auth");
 const {
   createTicket,
   getMyTickets,
@@ -14,9 +14,9 @@ const {
 router.get ("/admin",         protect, adminOnly,   getAdminTickets);
 router.put ("/:id/status",    protect, adminOnly,   updateTicketStatus);
 
-// Customer routes
-router.post("/",              protect, customerOnly, createTicket);
-router.get ("/",              protect, customerOnly, getMyTickets);
+// Customer or provider routes
+router.post("/",              protect, customerOrProviderOnly, createTicket);
+router.get ("/",              protect, customerOrProviderOnly, getMyTickets);
 
 // Shared (customer who owns it OR admin)
 router.get ("/:id",           protect,               getTicket);

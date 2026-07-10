@@ -5,6 +5,7 @@ const {
   createBooking,
   getMyBookings,
   getBookingById,
+  getBookingInvoice,
   cancelBooking,
   getProviderJobs,
   getAvailableJobs,
@@ -46,6 +47,7 @@ router.get("/admin/all",              protect, adminOnly,    getAllBookings);
 router.put("/:id/dispute",            protect,               raiseDispute);
 
 // Shared detail — customer or provider
+router.get("/:id/invoice",            protect,               getBookingInvoice);
 router.get("/:id",                    protect,               getBookingById);
 
 module.exports = router;
