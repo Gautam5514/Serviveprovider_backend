@@ -6,6 +6,14 @@ const { emitToRole } = require("../socket");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// ─── Regex helper — safe user-typed search terms ─────────────────────────────
+function escapeRegex(v = "") {
+  return String(v).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const MESSAGES_PAGE_SIZE_DEFAULT = 25;
+const MESSAGES_PAGE_SIZE_MAX = 100;
+
 // ─── POST /api/contact ────────────────────────────────────────────────────────
 // Public — anyone can submit the Contact Us form, logged in or not.
 const submitContactMessage = catchAsync(async (req, res) => {
@@ -49,18 +57,74 @@ const submitContactMessage = catchAsync(async (req, res) => {
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
 
-// GET /api/contact/admin — all messages, newest first (?status= filters)
+// GET /api/contact/admin — all messages, newest first (?status=, ?search=, ?page=, ?limit=)
+// Server-side paginated + searched so the list stays correct (and fast) no
+// matter how many messages pile up — nothing silently falls off past a fixed
+// cap the way an in-memory client-side filter would.
 const getAllMessages = catchAsync(async (req, res) => {
-  const { status } = req.query;
-  const filter = {};
-  if (status && status !== "all") filter.status = status;
+  const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(
+    MESSAGES_PAGE_SIZE_MAX,
+    Math.max(1, parseInt(req.query.limit, 10) || MESSAGES_PAGE_SIZE_DEFAULT)
+  );
+  const search = String(req.query.search || "").trim().slice(0, 120);
+  const status = req.query.status;
 
-  const messages = await ContactMessage.find(filter)
-    .sort({ createdAt: -1 })
-    .limit(500)
-    .lean();
+  let searchFilter = {};
+  if (search) {
+    const re = new RegExp(escapeRegex(search), "i");
+    searchFilter = { $or: [{ name: re }, { email: re }, { referenceNumber: re }, { message: re }] };
+  }
 
-  res.json({ success: true, messages });
+  const statusFilter =
+    status && status !== "all" && ContactMessage.CONTACT_STATUSES.includes(status)
+      ? { status }
+      : {};
+
+  const finalFilter = { ...searchFilter, ...statusFilter };
+
+  const [messages, total, statusAgg, unseenCount] = await Promise.all([
+    ContactMessage.find(finalFilter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    ContactMessage.countDocuments(finalFilter),
+    // Status breakdown respects the search term but not the status filter
+    // itself, so switching tabs never changes what the *other* tabs show.
+    ContactMessage.aggregate([
+      { $match: searchFilter },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    ContactMessage.countDocuments({ ...searchFilter, adminViewed: { $ne: true } }),
+  ]);
+
+  const counts = { all: 0, new: 0, in_progress: 0, resolved: 0 };
+  for (const s of statusAgg) {
+    counts[s._id] = s.count;
+    counts.all += s.count;
+  }
+
+  res.json({
+    success: true,
+    messages,
+    pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    counts,
+    unseenCount,
+  });
+});
+
+// PUT /api/contact/admin/:id/view
+// Opening one message's detail is what "reads" it — clears the sidebar badge
+// for just this message, not the whole list.
+const markMessageViewed = catchAsync(async (req, res) => {
+  const message = await ContactMessage.findByIdAndUpdate(
+    req.params.id,
+    { adminViewed: true },
+    { new: true }
+  );
+  if (!message) throw new AppError("Message not found.", 404);
+  res.json({ success: true, message });
 });
 
 // PUT /api/contact/admin/:id/status
@@ -96,6 +160,7 @@ const deleteMessage = catchAsync(async (req, res) => {
 module.exports = {
   submitContactMessage,
   getAllMessages,
+  markMessageViewed,
   updateStatus,
   updateNote,
   deleteMessage,

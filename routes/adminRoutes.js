@@ -8,6 +8,7 @@ const {
   verifyProvider,
   getApprovedProviders,
   getAnalytics,
+  getBadgeCounts,
   createCoupon,
   getAllCoupons,
   deleteCoupon,
@@ -29,6 +30,7 @@ router.get("/providers/:id/bookings", getProviderBookings);
 router.put("/providers/:id/verify",   verifyProvider);
 
 router.get("/analytics",            getAnalytics);
+router.get("/badge-counts",         getBadgeCounts);
 
 router.get("/services",             getAdminServices);
 router.get("/services/categories",  getAdminServiceCategories);

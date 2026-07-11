@@ -4,6 +4,7 @@ const { protect, adminOnly } = require("../middleware/auth");
 const {
   submitContactMessage,
   getAllMessages,
+  markMessageViewed,
   updateStatus,
   updateNote,
   deleteMessage,
@@ -11,6 +12,7 @@ const {
 
 // Admin — static paths kept before public routes
 router.get("/admin", protect, adminOnly, getAllMessages);
+router.put("/admin/:id/view", protect, adminOnly, markMessageViewed);
 router.put("/admin/:id/status", protect, adminOnly, updateStatus);
 router.put("/admin/:id/note", protect, adminOnly, updateNote);
 router.delete("/admin/:id", protect, adminOnly, deleteMessage);

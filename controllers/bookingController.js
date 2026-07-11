@@ -282,6 +282,9 @@ const createBooking = async (req, res) => {
       // guard and over-redeeming the same limited coupon. The filter also enforces
       // minOrderValue and applicableCategories so the rules checked by
       // /coupons/validate cannot be bypassed by calling this endpoint directly.
+      // minOrderValue/discount are checked against `totalAmount` (base + platform
+      // fee + tax) — the same "orderAmount" /coupons/validate is given — so the
+      // discount preview shown at checkout always matches what's actually charged.
       // `new: false` returns the doc as it was BEFORE the increment so the
       // original discountValue is used for the calculation below.
       const coupon = await Coupon.findOneAndUpdate(
@@ -289,7 +292,7 @@ const createBooking = async (req, res) => {
           code:          req.body.couponCode.toUpperCase().trim(),
           isActive:      true,
           expiresAt:     { $gt: new Date() },
-          minOrderValue: { $lte: basePrice },
+          minOrderValue: { $lte: totalAmount },
           $and: [
             { $or: [{ maxUses: null }, { $expr: { $lt: ["$usedCount", "$maxUses"] } }] },
             { $or: [{ applicableCategories: { $size: 0 } }, { applicableCategories: category }] },
@@ -305,7 +308,7 @@ const createBooking = async (req, res) => {
         });
       }
       discount   = coupon.discountType === "percent"
-        ? Math.round((basePrice * coupon.discountValue) / 100)
+        ? Math.round((totalAmount * coupon.discountValue) / 100)
         : coupon.discountValue;
       couponCode = coupon.code;
     }

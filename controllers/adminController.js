@@ -7,6 +7,9 @@ const ProviderWorkProof = require("../models/ProviderWorkProof");
 const ProviderBankDetails = require("../models/ProviderBankDetails");
 const ProviderAvailability = require("../models/ProviderAvailability");
 const ProviderAgreement = require("../models/ProviderAgreement");
+const CareerApplication = require("../models/CareerApplication");
+const ContactMessage = require("../models/ContactMessage");
+const SupportTicket = require("../models/SupportTicket");
 const { sendProviderDecisionEmail } = require("../utils/emailService");
 
 // ─── GET /admin/providers/pending ────────────────────────────────────────────
@@ -48,6 +51,13 @@ const getProviderDetails = async (req, res) => {
 
     if (!provider) {
       return res.status(404).json({ success: false, message: "Provider not found" });
+    }
+
+    // Opening this one application is what "reads" it — clears the sidebar
+    // badge for just this provider, not the whole pending list.
+    if (!provider.adminViewed) {
+      provider.adminViewed = true;
+      await provider.save();
     }
 
     const [documents, workProofs, bankDetails, availability, agreement] =
@@ -242,6 +252,27 @@ const getAnalytics = async (_req, res) => {
   }
 };
 
+// ─── GET /admin/badge-counts ──────────────────────────────────────────────────
+// Counts of items across the app that are waiting on an admin decision —
+// powers the small red badges next to each sidebar item.
+const getBadgeCounts = async (_req, res) => {
+  try {
+    const [applications, jobApplicants, contactMessages, support] = await Promise.all([
+      Provider.countDocuments({ isActive: false, adminViewed: { $ne: true } }),
+      CareerApplication.countDocuments({ adminViewed: { $ne: true } }),
+      ContactMessage.countDocuments({ adminViewed: { $ne: true } }),
+      SupportTicket.countDocuments({ unreadByAdmin: { $gt: 0 } }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      counts: { applications, jobApplicants, contactMessages, support },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message || "Server error" });
+  }
+};
+
 // ─── Coupon management (admin) ────────────────────────────────────────────────
 const { createCoupon, getAllCoupons, deleteCoupon } = require("./couponController");
 const {
@@ -259,6 +290,7 @@ module.exports = {
   verifyProvider,
   getApprovedProviders,
   getAnalytics,
+  getBadgeCounts,
   createCoupon,
   getAllCoupons,
   deleteCoupon,

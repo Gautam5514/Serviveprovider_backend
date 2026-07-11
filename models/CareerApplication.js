@@ -15,6 +15,10 @@ const CareerApplicationSchema = new mongoose.Schema(
 
     status: { type: String, enum: APPLICATION_STATUSES, default: "new" },
 
+    // Has an admin opened the Job Applicants list since this came in?
+    // Powers the sidebar badge, independent of the hiring status above.
+    adminViewed: { type: Boolean, default: false },
+
     submitterIp: { type: String, select: false },
   },
   { timestamps: true }

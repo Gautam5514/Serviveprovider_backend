@@ -200,6 +200,14 @@ const ProviderSchema = new mongoose.Schema(
       type: Date,
     },
 
+    // Has an admin opened the Applications list since this provider applied?
+    // Powers the sidebar badge — separate from isActive/onboardingStatus so
+    // the badge clears on view even before the application is decided.
+    adminViewed: {
+      type: Boolean,
+      default: false,
+    },
+
     // ─────────────────────────────────────────────
     // Aggregated stats (updated after each job)
     // ─────────────────────────────────────────────

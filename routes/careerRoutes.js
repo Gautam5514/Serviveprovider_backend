@@ -11,6 +11,7 @@ const {
   deleteCareer,
   getApplications,
   getAllApplications,
+  markApplicationViewed,
   updateApplicationStatus,
 } = require("../controllers/careerController");
 
@@ -18,6 +19,7 @@ const {
 router.get("/admin", protect, adminOnly, getAllCareers);
 router.post("/admin", protect, adminOnly, createCareer);
 router.get("/admin/applications", protect, adminOnly, getAllApplications);
+router.put("/admin/applications/:id/view", protect, adminOnly, markApplicationViewed);
 router.put("/admin/applications/:id/status", protect, adminOnly, updateApplicationStatus);
 router.get("/admin/:id/applications", protect, adminOnly, getApplications);
 router.put("/admin/:id", protect, adminOnly, updateCareer);

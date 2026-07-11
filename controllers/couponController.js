@@ -1,5 +1,25 @@
 const Coupon = require("../models/Coupon");
 
+// GET /api/coupons  — customer browses currently redeemable coupons
+// (Offers & Coupons page). Only surfaces ones that would actually pass
+// /coupons/validate right now — active, unexpired, and not used up.
+const getActiveCoupons = async (_req, res) => {
+  try {
+    const coupons = await Coupon.find({
+      isActive:  true,
+      expiresAt: { $gt: new Date() },
+      $or: [{ maxUses: null }, { $expr: { $lt: ["$usedCount", "$maxUses"] } }],
+    })
+      .select("code description discountType discountValue minOrderValue expiresAt applicableCategories")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({ success: true, coupons });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
 // POST /api/coupons/validate  — customer checks if a coupon is valid
 const validateCoupon = async (req, res) => {
   try {
@@ -109,4 +129,4 @@ const expireCoupon = async (req, res) => {
   }
 };
 
-module.exports = { validateCoupon, createCoupon, getAllCoupons, deleteCoupon, expireCoupon };
+module.exports = { getActiveCoupons, validateCoupon, createCoupon, getAllCoupons, deleteCoupon, expireCoupon };

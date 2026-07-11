@@ -7,6 +7,7 @@ const ProviderAgreement = require("../models/ProviderAgreement");
 const ProviderVerificationLog = require("../models/ProviderVerificationLog");
 const User = require("../models/User");
 const { createNotification } = require("../utils/notificationService");
+const { emitToRole } = require("../socket");
 
 // ─── Helper: log every status transition ────────────────────────────────────
 async function logAction(providerId, action, previousStatus, newStatus, performedBy = null, remarks = null) {
@@ -560,6 +561,10 @@ const step7Agreement = async (req, res) => {
           data: { providerId: provider._id },
         });
       }
+      emitToRole("admin", "provider:application:new", {
+        providerId: provider._id,
+        name: providerUser?.fullName || "A new provider",
+      });
     } catch (err) {
       console.error("Failed to send admin notification:", err);
     }

@@ -28,6 +28,10 @@ const ContactMessageSchema = new mongoose.Schema(
     status:    { type: String, enum: CONTACT_STATUSES, default: "new" },
     adminNote: { type: String, trim: true, maxlength: 2000, default: "" },
 
+    // Has an admin opened the Contact Messages list since this came in?
+    // Powers the sidebar badge, independent of the resolution status above.
+    adminViewed: { type: Boolean, default: false },
+
     submitterIp: { type: String, select: false },
   },
   { timestamps: true }
