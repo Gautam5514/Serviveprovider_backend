@@ -2,30 +2,14 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
 const { protect } = require("../middleware/auth");
 const { uploadLimiter } = require("../middleware/rateLimiter");
+const cloudinary = require("../config/cloudinary");
 
-// Ensure uploads directory exists
-const uploadDir = path.join(__dirname, "..", "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Multer config
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    // Generate unique name: timestamp + random number + original extension
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
+// Multer config — files are held in memory only, then streamed straight to
+// Cloudinary. Nothing touches local disk.
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 2 * 1024 * 1024, // 2 MB limit
   },
@@ -43,25 +27,45 @@ const upload = multer({
   },
 });
 
+// Streams a buffer to Cloudinary and resolves with the upload result.
+function uploadBufferToCloudinary(buffer, originalName) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "elitecrewplace/uploads",
+        resource_type: "auto", // auto-detects image vs. pdf
+        filename_override: originalName,
+        use_filename: true,
+        unique_filename: true,
+      },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
 // Single file upload route — auth required (KYC docs, work proofs, profile
-// photos are all uploaded by signed-in users) + rate-limited against disk abuse.
-router.post("/", protect, uploadLimiter, upload.single("file"), (req, res) => {
+// photos are all uploaded by signed-in users) + rate-limited against abuse.
+// Uploads go straight to Cloudinary; the response returns the hosted URL.
+router.post("/", protect, uploadLimiter, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
 
-    // Return the URL path to the file
-    // In a real production environment this would be an S3/Cloudinary URL
-    const fileUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-    
+    const result = await uploadBufferToCloudinary(req.file.buffer, req.file.originalname);
+
     res.status(200).json({
       success: true,
       message: "File uploaded successfully",
-      fileUrl: fileUrl,
+      fileUrl: result.secure_url,
+      publicId: result.public_id,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, message: error.message || "Upload failed" });
   }
 });
 
