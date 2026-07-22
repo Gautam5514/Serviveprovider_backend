@@ -4,6 +4,148 @@
 
 module.exports = [
   {
+    title: "Gautam Pandit: The Story Behind EliteCrew — Building a Marketplace People Can Actually Trust",
+    slug: "gautam-pandit-founder-elitecrew-story",
+    category: "Founder Story",
+    excerpt:
+      "Gautam Pandit is the founder and developer of EliteCrew & SplitEase — connecting verified home-service professionals with customers across 25+ cities. Read the full founder story.",
+    coverImage: "/images/gautam_pandit.png",
+    author: {
+      name: "Gautam Pandit",
+      role: "Founder & Developer, EliteCrew",
+    },
+    tags: ["Gautam Pandit", "EliteCrew founder", "who developed EliteCrew", "EliteCrew app developer", "SplitEase", "System Design", "Founder Story"],
+    readMinutes: 9,
+    isFeatured: true,
+    content: `If you've landed here searching **"who built EliteCrew"**, **"who developed EliteCrew"**, or **"Gautam Pandit EliteCrew"** — this is the real answer, straight from me. Not a corporate "About Us" page, but the actual story of why I built a home services marketplace, what problem I was chasing, and how it turned into a platform now live across 25+ cities.
+
+I'm **Gautam Pandit**, and I am the founder and lead developer behind **EliteCrew** — a marketplace that connects people with background-verified professionals for AC repair, fridge and appliance service, electrical work, cleaning, plumbing, and more, all with upfront pricing and a pay-after-the-job-is-done model.
+
+---
+
+## Connect With Me — Gautam Pandit
+
+Before diving into the story, feel free to connect with me across my personal social media profiles:
+
+- **Twitter / X:** [x.com/Gautamp5514](https://x.com/Gautamp5514)
+- **LinkedIn:** [linkedin.com/in/gautam-pandit-4b185224b](https://www.linkedin.com/in/gautam-pandit-4b185224b/)
+- **Instagram:** [instagram.com/gautamp5514](https://www.instagram.com/gautamp5514/)
+- **GitHub:** [github.com/Gautam5514](https://github.com/Gautam5514)
+- **Email:** [support@elitecrew.in](mailto:support@elitecrew.in)
+
+---
+
+## 1. The Problems I Kept Running Into During College
+
+Anyone who's ever lived in student housing or rented flat in India knows the drill: you ask around for a "reliable guy," you get three different price quotes for the same job, you're never quite sure if the person showing up at your door is actually who they say they are, and half the time you're paying before you even know if the fix worked.
+
+During my college days, living with roommates brought two constant, daily headaches:
+
+### A. The Shared Expense Chaos (Before SplitEase)
+Without a dedicated expense tracker like **SplitEase**, managing shared apartment expenses, groceries, internet bills, and rent settlements was a constant friction point. Paper notes got lost, spreadsheets became cluttered, and awkward money conversations strained friendships. I realized that managing shared finances needed a seamless, instant, and transparent solution.
+
+### B. The Broken Home-Service Experience (The Spark for EliteCrew)
+Whenever a ceiling fan wobbled, an AC leaked water, or a geyser short-circuited in our flat, finding a reliable technician was an agonizing experience. Informal technicians had zero identity verification, quoted inflated prices at the doorstep, showed up late without accountability, and gave no digital invoice or warranty.
+
+That gap — between *"I need this fixed today"* and *"I trust the person doing it and the price I'm being quoted"* — is exactly the problem EliteCrew exists to close. Not a directory of random numbers scribbled on a notepad, but an actual platform: verified professionals, transparent starting prices, and a simple promise — **you only pay once the job is done.**
+
+---
+
+## 2. Six Months of Research: SRS, Documentation & System Design
+
+Rather than jumping straight into writing code, I committed **six full months to intensive research and blueprinting**. Building a production-grade marketplace for services requires deep engineering discipline.
+
+During those 6 months, I focused on:
+
+- **Software Requirement Specification (SRS):** Documenting complete functional requirements, role-based access control (Customer, Provider, Admin), edge cases, and compliance workflows.
+- **Market & Workflow Analysis:** Studying real-world job lifecycle transitions: Booking Request → Instant Provider Notification → Acceptance → Geolocation Tracking → OTP Verification on arrival → Job Completion → Digital Invoice Generation → Customer Review.
+- **System Design & Data Modeling:** Designing MongoDB document schemas, indexing strategies, authentication state handling, real-time WebSockets, and state transition safety.
+- **Tech Stack Evaluation:** Selecting modern, scalable, and developer-friendly technologies capable of serving both web browsers and native mobile devices.
+
+---
+
+## 3. What I Set Out to Build
+
+The idea behind EliteCrew was never "list every service under the sun." It was to build the trust layer that home services in India were missing:
+
+- **KYC-Verified Professionals:** Every partner goes through Aadhaar, PAN, and background verification before they ever take a job.
+- **Upfront, Transparent Pricing:** The price shown is the price paid, invoice included, with zero surprise add-ons at the door.
+- **Pay After the Job is Done:** Start the job with an OTP, pay only once you're satisfied — zero advance payment, zero risk.
+- **Strict Quality Bar:** Professionals are held to a 4.2-star floor; fall below it, and they are off the platform.
+- **Instant Re-Booking:** One tap to re-book a professional you've already trusted once.
+
+On top of that trust layer, I built out an actual product experience: a searchable service catalog, an **appliance diagnoser** that walks a customer through symptoms to instantly surface the likely issue and recommended fix, category-by-category browsing, and a simple three-step flow: **pick a service → choose a slot → job done, then pay.**
+
+---
+
+## 4. Engineering & Tech Stack (Web + Mobile App)
+
+To ensure blistering speed, zero lag, and top-tier user experience across all devices, I engineered **EliteCrew** and **SplitEase** as both Web and Mobile applications:
+
+### Web Frontend (Next.js & Tailwind CSS)
+- Built on **Next.js 16 (React 19)** with server-side rendering (SSR), dynamic static generation, and Turbopack for maximum speed and SEO optimization.
+- Styled with custom **Vanilla Tailwind CSS**, Framer Motion micro-animations, and a sleek dark/light aesthetic designed to deliver a premium user experience.
+
+### Mobile Apps (React Native & Expo)
+- Developed native iOS and Android mobile apps (**Customer App** and **Provider App**) powered by **React Native & Expo**.
+- Features include location-based job discovery, real-time push notifications, job tracking, and instant OTP verification.
+
+### Backend API & Real-Time Engine (Node.js & Express)
+- Scalable **Node.js** and **Express** microservices handling JWT authentication, payment processing, invoice generation, and media uploads.
+- **Socket.io** integration for real-time provider location tracking and instant booking state synchronization.
+
+### Database & Storage (MongoDB & Mongoose)
+- Optimized **MongoDB** collections with explicit indexing for spatial location queries (GeoJSON), transaction logs, and user roles.
+
+---
+
+## 5. Where It Stands Today
+
+EliteCrew isn't a concept — it's a live, working marketplace with real numbers behind it:
+
+- **12,450+ bookings completed**
+- **2,000+ verified professionals** on the platform
+- **4.8★ average rating**, maintained by a strict quality floor
+- **Live in 25+ cities**, built out of New Delhi and expanding city by city
+- Professionals earning real, steady income through the platform — AC technicians averaging 18–22 jobs a month, electricians 20–28 jobs a month
+
+The two-sided nature of the platform matters as much as the customer side: EliteCrew isn't just where customers find trusted help, it's also where verified professionals get a steady, platform-backed stream of work — flexible hours, instant job alerts, and weekly direct payouts.
+
+---
+
+## 6. Day-by-Day Optimization & Open to Feedback
+
+Creating software is an ongoing craft. After launching the initial versions, I dedicate every single day to refining performance:
+
+- **Lighthouse & Core Web Vitals:** Reduced LCP (Largest Contentful Paint) and optimized bundle sizes.
+- **Security & Reliability:** Enforced strict parameter validation, input sanitization, rate-limiting, and JWT authentication token handling.
+- **User-Centric UX:** Streamlined the booking flow so customers can book a verified professional in under 30 seconds.
+
+EliteCrew is expanding city by city, service by service, and I'm treating it the same way I treat every product I build: ship something real, watch how people actually use it, and keep tightening the parts that matter.
+
+**If you're a customer, a service professional, or just someone curious about the platform, I'd genuinely like to hear from you.** Feedback — good or critical — is what shapes what gets built next.
+
+---
+
+### Try EliteCrew
+
+🌐 Web: **[elitecrew.in](https://elitecrew.in)**
+🛠️ For professionals: register directly on the platform to get verified and start receiving job alerts
+📍 Live in 25+ cities and growing
+
+### Connect with Gautam Pandit
+
+- **LinkedIn:** [linkedin.com/in/gautam-pandit-4b185224b](https://www.linkedin.com/in/gautam-pandit-4b185224b/)
+- **Instagram:** [instagram.com/gautamp5514](https://www.instagram.com/gautamp5514/)
+- **Twitter / X:** [x.com/Gautamp5514](https://x.com/Gautamp5514)
+- **GitHub:** [github.com/Gautam5514](https://github.com/Gautam5514)
+- **Email:** [support@elitecrew.in](mailto:support@elitecrew.in)
+
+---
+
+*Building or scaling a two-sided marketplace, or just want to talk about what it takes to earn trust in a local-services product? Reach out — I read everything.*`,
+  },
+  {
     title: "9 Signs Your AC Needs Servicing Before Summer Hits",
     slug: "signs-your-ac-needs-servicing",
     category: "AC & Cooling",
@@ -12,7 +154,7 @@ module.exports = [
     coverImage: "/images/ac_deep_cleaning.png",
     tags: ["AC service", "AC maintenance", "summer prep"],
     readMinutes: 5,
-    isFeatured: true,
+    isFeatured: false,
     content: `Every summer, the same story plays out across India: temperatures cross 40°C, lakhs of ACs get switched on together, and service providers get booked out for days. The families who suffer most are the ones whose AC gave warnings for weeks — warnings nobody acted on.
 
 Here are the nine signs your AC is asking for help, roughly in order of how often we see them.

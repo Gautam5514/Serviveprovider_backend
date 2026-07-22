@@ -37,15 +37,18 @@ function estimateReadMinutes(content = "") {
 }
 
 async function seedIfEmpty() {
-  const count = await BlogPost.countDocuments({ isSeed: true });
-  if (count === 0) {
-    await BlogPost.insertMany(
-      SEED_POSTS.map((p) => ({
-        ...p,
-        isSeed: true,
-        isPublished: true,
-        readMinutes: p.readMinutes || estimateReadMinutes(p.content),
-      }))
+  for (const p of SEED_POSTS) {
+    await BlogPost.findOneAndUpdate(
+      { slug: p.slug },
+      {
+        $set: {
+          ...p,
+          isSeed: true,
+          isPublished: true,
+          readMinutes: p.readMinutes || estimateReadMinutes(p.content),
+        },
+      },
+      { upsert: true, new: true }
     );
   }
 }
