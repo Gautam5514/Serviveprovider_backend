@@ -10,7 +10,7 @@ const mongoSanitize = require("express-mongo-sanitize");
 dotenv.config();
 
 // ─── Environment validation — fail fast before any code runs ─────────────────
-const REQUIRED_ENV = ["MONGODB_URI", "JWT_SECRET", "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "FRONTEND_URL"];
+const REQUIRED_ENV = ["MONGODB_URI", "JWT_SECRET", "SMTP_HOST", "SMTP_USER", "SMTP_PASS", "FRONTEND_URL", "REDIS_URL"];
 const missingVars = REQUIRED_ENV.filter((key) => !process.env[key]);
 if (missingVars.length > 0) {
   console.error(`\n[FATAL] Missing required environment variables: ${missingVars.join(", ")}`);
@@ -34,6 +34,10 @@ const connectDB = require("./config/db");
 const { initSocket } = require("./socket");
 const { generalLimiter } = require("./middleware/rateLimiter");
 const errorHandler = require("./middleware/errorHandler");
+const { startOrderWorker, stopOrderWorker } = require("./workers/orderWorker");
+const { orderQueue, orderQueueEvents } = require("./queues/orderQueue");
+const { startEmailWorker, stopEmailWorker } = require("./workers/emailWorker");
+const { emailQueue, emailQueueEvents } = require("./queues/emailQueue");
 
 const app = express();
 const server = http.createServer(app);
@@ -140,6 +144,13 @@ async function startServer() {
   try {
     await connectDB();
     initSocket(server, allowedOrigins);
+    // Worker is started in-process alongside the API. BullMQ workers running
+    // in multiple instances safely share one queue (jobs are locked
+    // per-consumer), so as the API scales horizontally, job-processing
+    // capacity scales with it automatically — no separate deployment needed
+    // unless order volume later justifies splitting it out.
+    startOrderWorker();
+    startEmailWorker();
   } catch (error) {
     console.error("[FATAL] Failed to start server:", error.message);
     process.exit(1);
@@ -147,14 +158,52 @@ async function startServer() {
 }
 
 // ─── Process-level safety nets ────────────────────────────────────────────────
+// A rejected promise with no .catch() is almost always a missed edge case in
+// one request handler — NOT proof the whole process is corrupted. Killing the
+// entire server for it (as this used to do) drops every other user's
+// in-flight request/socket connection too, so busier traffic (e.g. many
+// concurrent support chats) turned one missed .catch() into a full outage.
+// Log with full context and keep serving everyone else; only a genuinely
+// synchronous crash (uncaughtException below) still exits, since that one
+// really can leave process state corrupted.
 process.on("unhandledRejection", (err) => {
-  console.error("[FATAL] Unhandled promise rejection:", err);
-  server.close(() => process.exit(1));
+  console.error("[UNHANDLED REJECTION] This is a bug — a promise rejected with no .catch(). Process is staying up:", err);
 });
 
 process.on("uncaughtException", (err) => {
   console.error("[FATAL] Uncaught exception:", err);
   process.exit(1);
 });
+
+// ─── Graceful shutdown ─────────────────────────────────────────────────────────
+// On deploy/restart, let the worker finish whatever job it's mid-processing
+// instead of killing it — an interrupted Mongo write mid-broadcast is exactly
+// the kind of partial-failure state the idempotency guard in orderWorker.js
+// exists to clean up after, but avoiding it here is cheap and faster to recover.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Server] ${signal} received — shutting down gracefully...`);
+  try {
+    await stopOrderWorker();
+    await orderQueue.close();
+    await orderQueueEvents.close();
+    await stopEmailWorker();
+    await emailQueue.close();
+    await emailQueueEvents.close();
+  } catch (err) {
+    console.error("[Server] Error during queue/worker shutdown:", err.message);
+  }
+  server.close(() => {
+    console.log("[Server] HTTP server closed.");
+    process.exit(0);
+  });
+  // Force-exit if something (an open socket, a stuck connection) prevents
+  // server.close() from ever calling back.
+  setTimeout(() => process.exit(1), 10000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 startServer();

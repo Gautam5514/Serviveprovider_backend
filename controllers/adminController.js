@@ -11,6 +11,7 @@ const CareerApplication = require("../models/CareerApplication");
 const ContactMessage = require("../models/ContactMessage");
 const SupportTicket = require("../models/SupportTicket");
 const { sendProviderDecisionEmail } = require("../utils/emailService");
+const { enqueueEmail } = require("../queues/emailQueue");
 
 // ─── GET /admin/providers/pending ────────────────────────────────────────────
 const getPendingProviders = async (_req, res) => {
@@ -154,13 +155,14 @@ const verifyProvider = async (req, res) => {
     }
     await provider.save();
 
-    // Fire-and-forget email — never block the API response on email failure
-    sendProviderDecisionEmail(
-      provider.userId.email,
-      provider.userId.fullName,
-      status,
-      remarks || null
-    ).catch((err) => console.error("Decision email failed:", err.message));
+    // Durable + retried by the email worker instead of a bare fire-and-forget
+    // promise — a provider's approval/rejection email is important enough to
+    // retry on a transient SMTP failure rather than silently drop.
+    enqueueEmail(
+      "sendProviderDecisionEmail",
+      [provider.userId.email, provider.userId.fullName, status, remarks || null],
+      () => sendProviderDecisionEmail(provider.userId.email, provider.userId.fullName, status, remarks || null)
+    ).catch((err) => console.error("[Admin] enqueueEmail failed for provider decision:", err));
 
     res.status(200).json({
       success: true,

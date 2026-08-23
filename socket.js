@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("./models/User");
+const { createRedisConnection } = require("./config/redis");
 
 let ioInstance = null;
 
@@ -9,6 +10,7 @@ function userRoom(userId) {
 
 function initSocket(server, allowedOrigins) {
   const { Server } = require("socket.io");
+  const { createAdapter } = require("@socket.io/redis-adapter");
 
   const io = new Server(server, {
     cors: {
@@ -16,6 +18,18 @@ function initSocket(server, allowedOrigins) {
       credentials: true,
     },
   });
+
+  // Redis adapter: without this, emitToUser/emitToRole only reach sockets
+  // connected to THIS process. Once the backend runs as more than one
+  // instance (the actual point of doing this queue work — scaling out), a
+  // customer connected to instance A would never see an event triggered by
+  // a job processed on instance B. Pub/sub needs two dedicated connections;
+  // errors here are logged (see config/redis.js) but never crash the
+  // process — Socket.IO just falls back to single-instance behaviour until
+  // Redis is reachable again.
+  const pubClient = createRedisConnection("socketio-pub");
+  const subClient = createRedisConnection("socketio-sub");
+  io.adapter(createAdapter(pubClient, subClient));
 
   io.use(async (socket, next) => {
     try {

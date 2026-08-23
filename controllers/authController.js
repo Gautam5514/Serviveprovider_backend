@@ -4,6 +4,7 @@ const jwt      = require("jsonwebtoken");
 const User     = require("../models/User");
 const EmailOTP = require("../models/EmailOTP");
 const { sendOTPEmail } = require("../utils/emailService");
+const { enqueueEmail } = require("../queues/emailQueue");
 const AppError   = require("../utils/AppError");
 const catchAsync = require("../utils/catchAsync");
 
@@ -74,7 +75,12 @@ async function _sendOTP(email, purpose) {
     expiresAt: new Date(Date.now() + 10 * 60_000),
   });
 
-  await sendOTPEmail(emailLower, otp, purpose);
+  // Durable + retried by the email worker (SMTP hiccups no longer fail the
+  // whole signup/login request) — falls back to sending inline only if Redis
+  // itself is unreachable.
+  await enqueueEmail("sendOTPEmail", [emailLower, otp, purpose], () =>
+    sendOTPEmail(emailLower, otp, purpose)
+  );
 
   return signToken({ email: emailLower, purpose }, "10m");
 }
@@ -382,7 +388,9 @@ const forgotPassword = catchAsync(async (req, res) => {
     purpose:   "forgot_password",
     expiresAt: new Date(Date.now() + 10 * 60_000),
   });
-  await sendOTPEmail(emailLower, otp, "forgot_password");
+  await enqueueEmail("sendOTPEmail", [emailLower, otp, "forgot_password"], () =>
+    sendOTPEmail(emailLower, otp, "forgot_password")
+  );
 
   const verificationToken = signToken({ email: emailLower, purpose: "forgot_password" }, "10m");
   res.json({

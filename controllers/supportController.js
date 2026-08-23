@@ -236,14 +236,13 @@ const sendMessage = catchAsync(async (req, res) => {
     text:       text.trim(),
   });
 
-  // Update ticket meta
-  const ticketUpdate = { lastMessageAt: new Date() };
-  if (isAdmin) {
-    ticketUpdate.status            = "in_progress";
-    ticketUpdate.unreadByRequester = (ticket.unreadByRequester || 0) + 1;
-  } else {
-    ticketUpdate.unreadByAdmin     = (ticket.unreadByAdmin || 0) + 1;
-  }
+  // Update ticket meta. $inc is atomic in MongoDB — two messages landing on
+  // the same ticket in the same instant (e.g. admin + requester both typing)
+  // each apply their own +1 instead of one clobbering the other's
+  // read-then-write, which is what `(ticket.unreadByAdmin || 0) + 1` did.
+  const ticketUpdate = isAdmin
+    ? { $set: { lastMessageAt: new Date(), status: "in_progress" }, $inc: { unreadByRequester: 1 } }
+    : { $set: { lastMessageAt: new Date() }, $inc: { unreadByAdmin: 1 } };
   await SupportTicket.findByIdAndUpdate(ticket._id, ticketUpdate);
 
   const payload = {

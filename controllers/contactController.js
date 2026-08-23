@@ -2,6 +2,7 @@ const ContactMessage = require("../models/ContactMessage");
 const AppError = require("../utils/AppError");
 const catchAsync = require("../utils/catchAsync");
 const { sendContactConfirmationEmail } = require("../utils/emailService");
+const { enqueueEmail } = require("../queues/emailQueue");
 const { emitToRole } = require("../socket");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -47,10 +48,13 @@ const submitContactMessage = catchAsync(async (req, res) => {
     createdAt: ticket.createdAt,
   });
 
-  // Best-effort confirmation email — never fail the submission over SMTP issues.
-  sendContactConfirmationEmail(ticket.email, ticket.name, ticket.referenceNumber, ticket.topic).catch(
-    (err) => console.error("Contact confirmation email failed:", err.message)
-  );
+  // Durable + retried by the email worker — never fails the submission over
+  // SMTP issues, and no longer silently drops on a transient failure either.
+  enqueueEmail(
+    "sendContactConfirmationEmail",
+    [ticket.email, ticket.name, ticket.referenceNumber, ticket.topic],
+    () => sendContactConfirmationEmail(ticket.email, ticket.name, ticket.referenceNumber, ticket.topic)
+  ).catch((err) => console.error("[Contact] enqueueEmail failed:", err));
 
   res.status(201).json({ success: true, referenceNumber: ticket.referenceNumber });
 });

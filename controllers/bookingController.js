@@ -13,6 +13,8 @@ const {
 const { generateInvoicePdf } = require("../utils/invoicePdf");
 const { createNotification, notifyMany } = require("../utils/notificationService");
 const { emitToUser } = require("../socket");
+const { enqueueMatchProviders } = require("../queues/orderQueue");
+const { enqueueEmail } = require("../queues/emailQueue");
 
 const DAY_MAP = ["sun","mon","tue","wed","thu","fri","sat"];
 
@@ -348,20 +350,27 @@ const createBooking = async (req, res) => {
       bookingId: booking._id,
     }).catch(console.error);
 
-    getMatchingProvidersForBooking(booking)
-      .then((matches) => notifyMany(matches.map(({ provider, distanceKm }) => ({
-        recipientId: provider.userId,
-        recipientRole: "provider",
-        type: "new_job_available",
-        title: "New job near you",
-        message: `${booking.serviceName} is available in ${booking.address?.city || "your service area"}. Confirm first to claim it.`,
-        bookingId: booking._id,
-        data: {
-          distanceKm: distanceKm === null ? null : Number(distanceKm.toFixed(1)),
-          serviceCategory: booking.serviceCategory,
-        },
-      }))))
-      .catch(console.error);
+    // Broadcasting to matching providers is durable/retried via BullMQ (see
+    // queues/orderQueue.js + workers/orderWorker.js) instead of a bare
+    // fire-and-forget promise — a crash or transient DB error no longer loses
+    // the job silently. If Redis itself is down, enqueueMatchProviders falls
+    // back to running this inline so the broadcast still happens once.
+    enqueueMatchProviders(booking._id, {}, () =>
+      getMatchingProvidersForBooking(booking).then((matches) =>
+        notifyMany(matches.map(({ provider, distanceKm }) => ({
+          recipientId: provider.userId,
+          recipientRole: "provider",
+          type: "new_job_available",
+          title: "New job near you",
+          message: `${booking.serviceName} is available in ${booking.address?.city || "your service area"}. Confirm first to claim it.`,
+          bookingId: booking._id,
+          data: {
+            distanceKm: distanceKm === null ? null : Number(distanceKm.toFixed(1)),
+            serviceCategory: booking.serviceCategory,
+          },
+        })))
+      )
+    ).catch((err) => console.error(`[Booking] provider broadcast failed for ${booking._id}:`, err));
 
     res.status(201).json({
       success: true,
@@ -733,8 +742,8 @@ const providerCancelJob = async (req, res) => {
     }).catch(console.error);
 
     // Re-broadcast to other matching providers (skip the one who just released).
-    getMatchingProvidersForBooking(booking)
-      .then((matches) => notifyMany(
+    enqueueMatchProviders(booking._id, { excludeUserId: releasedByUserId }, () =>
+      getMatchingProvidersForBooking(booking).then((matches) => notifyMany(
         matches
           .filter(({ provider: p }) => p.userId?.toString() !== releasedByUserId?.toString())
           .map(({ provider: p, distanceKm }) => ({
@@ -750,7 +759,7 @@ const providerCancelJob = async (req, res) => {
             },
           }))
       ))
-      .catch(console.error);
+    ).catch((err) => console.error(`[Booking] release re-broadcast failed for ${booking._id}:`, err));
 
     res.json({ success: true, message: "Job released. We're finding the customer another provider.", booking: stripOtp(booking) });
   } catch (error) {
@@ -870,10 +879,20 @@ const completeJob = async (req, res) => {
       User.findById(provider.userId).select("fullName phone"),
     ]);
     if (customer?.email) {
-      sendJobCompletedEmail(customer.email, customer.fullName, booking, {
-        providerName: providerUser?.fullName,
-        providerPhone: providerUser?.phone,
-      }).catch(console.error);
+      // This email also generates the PDF invoice attachment (see
+      // sendJobCompletedEmail -> generateInvoicePdf) — the heaviest inline
+      // work in this request, now durable + retried instead of a bare
+      // fire-and-forget promise. booking.toObject() so the job payload is a
+      // plain, JSON-serialisable snapshot rather than a live Mongoose doc.
+      const bookingSnapshot = booking.toObject();
+      const emailArgs = [
+        customer.email,
+        customer.fullName,
+        bookingSnapshot,
+        { providerName: providerUser?.fullName, providerPhone: providerUser?.phone },
+      ];
+      enqueueEmail("sendJobCompletedEmail", emailArgs, () => sendJobCompletedEmail(...emailArgs))
+        .catch((err) => console.error(`[Booking] completion email enqueue failed for ${booking._id}:`, err));
     }
 
     res.json({ success: true, message: "Job completed successfully!", booking: stripOtp(booking) });
@@ -1222,4 +1241,5 @@ module.exports = {
   updateProviderLocation,
   getProviderEarnings,
   raiseDispute,
+  getMatchingProvidersForBooking, // reused by workers/orderWorker.js
 };

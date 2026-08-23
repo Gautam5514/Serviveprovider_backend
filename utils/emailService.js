@@ -3,16 +3,29 @@ const { generateInvoicePdf } = require("./invoicePdf");
 
 // All clickable links in emails use this base URL.
 // Set FRONTEND_URL in production .env to your real domain.
-const FRONTEND_URL = (process.env.FRONTEND_URL || "${FRONTEND_URL}").replace(/\/$/, "");
+// (Previous fallback was the literal string "${FRONTEND_URL}" — a broken
+// interpolation artifact that would have printed straight into every CTA
+// link and footer if FRONTEND_URL were ever unset. REQUIRED_ENV in index.js
+// already guarantees it's set before the app boots, so this is a last-resort
+// safety net, not something that should ever actually be hit in production.)
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT),
+  port: parseInt(process.env.SMTP_PORT, 10) || 587,
   secure: process.env.SMTP_SECURE === "true",
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+});
+
+// Fail loudly and early (at boot) if SMTP credentials are wrong, instead of
+// only discovering it later when the first queued email silently exhausts
+// its retries. Non-blocking — verify() is I/O, so this never delays startup.
+transporter.verify((err) => {
+  if (err) console.error(`[EmailService] SMTP connection FAILED — emails will not send: ${err.message}`);
+  else console.log("[EmailService] SMTP connection verified — ready to send.");
 });
 
 // ─── Design tokens (must stay email-client safe: tables, inline CSS, no flex,
@@ -191,14 +204,27 @@ function renderEmail({ preheader, badge, badgeTone, bodyHtml, recipientEmail, re
 }
 
 async function sendMail({ to, subject, html, text, attachments }) {
-  await transporter.sendMail({
-    from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
-    to,
-    subject,
-    html,
-    text,
-    attachments,
-  });
+  try {
+    const info = await transporter.sendMail({
+      from: `"EliteCrew" <${process.env.SMTP_FROM}>`,
+      to,
+      subject,
+      html,
+      text,
+      attachments,
+    });
+    // Emails now run through workers/emailWorker.js in the background — this
+    // is the only place a successful send is ever visible, so it's worth
+    // logging the provider's messageId for tracing a specific delivery.
+    console.log(`[EmailService] sent "${subject}" to ${to} — messageId=${info.messageId}`);
+    return info;
+  } catch (err) {
+    // Re-thrown as-is so BullMQ's retry/backoff still applies — this log
+    // just attaches the recipient/subject context that a bare stack trace
+    // from inside nodemailer wouldn't otherwise carry.
+    console.error(`[EmailService] send FAILED — "${subject}" to ${to}: ${err.message}`);
+    throw err;
+  }
 }
 
 // ─── OTP / verification emails ───────────────────────────────────────────────
@@ -448,18 +474,78 @@ Contact support: ${FRONTEND_URL}/login
     return { subject, html, text };
   }
 
+  if (decision === "blocked") {
+    // "blocked" is a distinct, permanent status from "suspended" (Provider
+    // model's ONBOARDING_STATUSES) — reachable from adminController's
+    // verifyProvider — but this branch didn't exist, so an admin blocking a
+    // provider silently sent no email at all.
+    const subject = "Your EliteCrew partner account has been blocked";
+    const remarksBlock = remarks ? notice("danger", "Reason for this decision", safeRemarks) : "";
+
+    const bodyHtml = `
+      <h1 style="margin:0 0 10px;font-size:22px;font-weight:800;color:${C.ink};letter-spacing:-0.3px;line-height:1.3;">Hi ${name},</h1>
+      <p style="margin:0 0 24px;font-size:14px;color:${C.body};line-height:1.7;">
+        Your EliteCrew partner account has been <strong style="color:${C.ink};">blocked</strong> following a
+        review by our team. Your profile is no longer visible to customers and you will not receive job requests.
+      </p>
+
+      ${remarksBlock}
+
+      <p style="margin:0 0 28px;font-size:14px;color:${C.body};line-height:1.7;">
+        If you believe this decision was made in error, contact our support team — they can review the
+        account and explain the next steps available to you.
+      </p>
+
+      ${ctaButton(`${FRONTEND_URL}/contact`, "Contact support")}`;
+
+    const html = renderEmail({
+      preheader: "Your partner account has been blocked. Contact support if you believe this is an error.",
+      badge: "Account Blocked",
+      badgeTone: "danger",
+      bodyHtml,
+      recipientEmail,
+      reason: "You received this email because of a status change on your EliteCrew partner account.",
+    });
+
+    const text = `Hi ${providerName},
+
+Your EliteCrew partner account has been blocked following a review by our team. Your profile is no longer visible to customers and you will not receive job requests.
+${remarks ? `\nReason for this decision: ${remarks}\n` : ""}
+If you believe this decision was made in error, contact our support team.
+
+Contact support: ${FRONTEND_URL}/contact
+
+— EliteCrew · Professional Home Services`;
+
+    return { subject, html, text };
+  }
+
   return null;
 }
 
 async function sendProviderDecisionEmail(to, providerName, decision, remarks) {
   const result = buildDecisionEmail(providerName, decision, remarks, to);
-  if (!result) return;
+  if (!result) {
+    // All 4 real decision values (approved/rejected/suspended/blocked) are
+    // handled above — reaching here means an unrecognised value slipped
+    // past adminController's validation. Log it instead of silently
+    // dropping the notification, which is what happened before "blocked"
+    // had a branch.
+    console.error(`[EmailService] sendProviderDecisionEmail: no template for decision "${decision}" — email NOT sent to ${to}.`);
+    return;
+  }
   await sendMail({ to, subject: result.subject, html: result.html, text: result.text });
 }
 
 // ─── Booking notification emails ─────────────────────────────────────────────
 
-function bookingDetailRows(b) {
+// Raw (unescaped) field values shared by both the HTML and plain-text
+// renderers below. Building each renderer from these directly — rather than
+// having the text version try to reverse-escape the HTML version's output —
+// avoids the previous bug where bookingDetailsText() only undid `&amp;` and
+// left `&lt;`/`&gt;`/`&quot;` showing up literally in the plain-text email
+// whenever a service name or address contained `<`, `>`, or `"`.
+function bookingDetailFields(b) {
   const date = new Date(b.scheduledDate).toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
@@ -467,19 +553,24 @@ function bookingDetailRows(b) {
     year: "numeric",
   });
   const slot = b.scheduledTimeSlot || "";
+  const address = [b.address?.text, b.address?.city].filter(Boolean).join(", ") || "—";
   return [
-    ["Booking No.", esc(b.bookingNumber || "—")],
-    ["Service", esc(b.serviceName)],
-    ["Date", esc(date + (slot ? " · " + slot : ""))],
-    ["Address", esc(`${b.address?.text || ""}, ${b.address?.city || ""}`)],
+    ["Booking No.", b.bookingNumber || "—"],
+    ["Service", b.serviceName || "—"],
+    ["Date", date + (slot ? " · " + slot : "")],
+    ["Address", address],
     ["Payment", b.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : "Online"],
     ["Total", `₹${(b.pricing?.totalAmount || 0).toLocaleString("en-IN")}`],
   ];
 }
 
+function bookingDetailRows(b) {
+  return bookingDetailFields(b).map(([label, value]) => [label, esc(value)]);
+}
+
 function bookingDetailsText(b) {
-  return bookingDetailRows(b)
-    .map(([label, value]) => `${label}: ${value.replace(/&amp;/g, "&")}`)
+  return bookingDetailFields(b)
+    .map(([label, value]) => `${label}: ${value}`)
     .join("\n");
 }
 
