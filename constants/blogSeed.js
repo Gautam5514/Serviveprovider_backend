@@ -31,7 +31,7 @@ Before diving into the story, feel free to connect with me across my personal so
 - **LinkedIn:** [linkedin.com/in/gautam-pandit-4b185224b](https://www.linkedin.com/in/gautam-pandit-4b185224b/)
 - **Instagram:** [instagram.com/gautamp5514](https://www.instagram.com/gautamp5514/)
 - **GitHub:** [github.com/Gautam5514](https://github.com/Gautam5514)
-- **Email:** [support@elitecrew.in](mailto:support@elitecrew.in)
+- **Email:** [support@elitecrew.online](mailto:support@elitecrew.online)
 
 ---
 
@@ -139,7 +139,7 @@ EliteCrew is expanding city by city, service by service, and I'm treating it the
 - **Instagram:** [instagram.com/gautamp5514](https://www.instagram.com/gautamp5514/)
 - **Twitter / X:** [x.com/Gautamp5514](https://x.com/Gautamp5514)
 - **GitHub:** [github.com/Gautam5514](https://github.com/Gautam5514)
-- **Email:** [support@elitecrew.in](mailto:support@elitecrew.in)
+- **Email:** [support@elitecrew.online](mailto:support@elitecrew.online)
 
 ---
 
